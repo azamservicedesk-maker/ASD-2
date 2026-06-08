@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../supabaseService"; // Adjust this path depending on your folder layout
+import { supabase } from "../supabaseService"; // Adjust path if your layout differs
 
-export function useSynchronizedData(tableName: string = "app_data") {
+export function useSynchronizedData(tableName: string) {
   const [dataItems, setDataItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Fetch current dynamic records from database
+    // 1. Fetch current dynamic records from database immediately upon loading
     const fetchRecords = async () => {
       try {
+        if (!supabase) return;
         const { data, error } = await supabase
           .from(tableName)
           .select("*")
@@ -17,7 +18,7 @@ export function useSynchronizedData(tableName: string = "app_data") {
         if (error) throw error;
         if (data) setDataItems(data);
       } catch (err) {
-        console.error(`Error fetching data from ${tableName}:`, err);
+        console.error(`Error fetching data from table [${tableName}]:`, err);
       } finally {
         setLoading(false);
       }
@@ -25,15 +26,27 @@ export function useSynchronizedData(tableName: string = "app_data") {
     
     fetchRecords();
 
-    // 2. Listen to real-time additions/deletions automatically
+    // 2. Listen to real-time additions/deletions on the database server automatically
     const dataSubscription = supabase
-      .channel(`${tableName}-sync-channel`)
+      .channel(`${tableName}-realtime-sync`)
       .on("postgres_changes", { event: "*", schema: "public", table: tableName }, (payload) => {
         if (payload.eventType === "INSERT") {
           setDataItems((prev) => [payload.new, ...prev]);
         } else if (payload.eventType === "DELETE") {
           setDataItems((prev) => prev.filter((item) => item.id !== payload.old.id));
         } else if (payload.eventType === "UPDATE") {
+          setDataItems((prev) => prev.map((item) => item.id === payload.new.id ? payload.new : item));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(dataSubscription);
+    };
+  }, [tableName]);
+
+  return { dataItems, loading };
+}
           setDataItems((prev) => prev.map((item) => item.id === payload.new.id ? payload.new : item));
         }
       })
