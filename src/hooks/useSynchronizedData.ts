@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../supabaseService"; // Adjust path if your layout differs
+import { supabase } from "../supabaseService"; 
 
 export function useSynchronizedData(tableName: string) {
   const [dataItems, setDataItems] = useState<any[]>([]);
@@ -41,19 +41,7 @@ export function useSynchronizedData(tableName: string) {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(dataSubscription);
-    };
-  }, [tableName]);
-
-  return { dataItems, loading };
-}
-          setDataItems((prev) => prev.map((item) => item.id === payload.new.id ? payload.new : item));
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(dataSubscription);
+      if (supabase) supabase.removeChannel(dataSubscription);
     };
   }, [tableName]);
 
