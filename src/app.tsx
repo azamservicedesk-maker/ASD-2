@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { supabase } from "./supabaseService"; // Or wherever your client client initializes
+import { useSynchronizedData } from "./hooks/useSynchronizedData";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -3021,62 +3022,121 @@ function LoadingScreen() {
 export default function App() {
   const [ready,       setReady]       = useState(false);
   const [currentUser, setCurrentUser] = useState<User|null>(null);
-  const [users,       setUsers]       = useState<User[]>([INITIAL_ADMIN]);
+  const { dataItems: dbUsers } = useSynchronizedData("users_profiles");
+  const users = dbUsers.length > 0 ? dbUsers : [INITIAL_ADMIN];
   const [regions,     setRegions]     = useState<Region[]>([]);
-  const [allJobs,     setAllJobs]     = useState<Job[]>([]);
-  const [messages,    setMessages]    = useState<Message[]>([]);
+  const { dataItems: allJobs } = useSynchronizedData("jobs");
+  const { dataItems: messages } = useSynchronizedData("messages");
 
   useEffect(() => {
-    async function loadCloudSession() {
-      try {
+  async function loadCloudSession() {
+    try {
+      // Safely check session storage inside browser context windows
+      if (typeof window !== "undefined") {
         const savedUid = loadSession();
-        // Retrieve and sync users from the backend list
-        const usersRes = await fetch("/api/users");
-        if (usersRes.ok) {
-          const uData = await usersRes.json();
-          if (uData && Array.isArray(uData.users)) {
-            setUsers(uData.users);
-            db.set("users", uData.users);
-          }
-        }
 
         if (savedUid) {
-          // Verify session via API
-          const res = await fetch(`/api/users/profile?id=${savedUid}`);
-          if (res.ok) {
-            const data = await res.json();
-            setCurrentUser(data.user || data);
+          // Fetch verified profile records directly from your live table matrix
+          const { data, error } = await supabase
+            .from("users_profiles")
+            .select("*")
+            .eq("id", savedUid)
+            .maybeSingle();
+
+          if (data && !error) {
+            setCurrentUser(data);
           } else {
             clearSession();
           }
         }
-      } catch (err) {
-        console.error("Session sync failed:", err);
-      } finally {
-        setReady(true);
       }
-    }
-    loadCloudSession();
-  }, []);
-
-
-  async function saveUsers(u: User[]) {
-    setUsers(u);
-    db.set("users", u);
-    try {
-      await fetch("/api/users/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ users: u })
-      });
     } catch (err) {
-      console.error("Failed to sync users to backend:", err);
+      console.error("Session initialization failure:", err);
+    } finally {
+      setReady(true);
     }
   }
+  loadCloudSession();
+}, []);
+
+  // 👥 Dynamically sync user adjustments straight into the database table rows
+async function saveUsers(u: User[]) {
+  try {
+    // We grab the last added or updated user profile in the sequence array
+    const targetUser = u[u.length - 1];
+    if (!targetUser) return;
+
+    const payload = {
+      id: targetUser.id,
+      created_at: targetUser.createdAt || new Date().toISOString(),
+      name: targetUser.name,
+      username: targetUser.username,
+      password: targetUser.password, // Keeps your client-side text hashes intact
+      role: targetUser.role,
+      region: targetUser.region || "HQ",
+      branch: targetUser.branch || "",
+      managementType: targetUser.managementType || ""
+    };
+
+    const { error } = await supabase
+      .from("users_profiles")
+      .upsert([payload], { onConflict: "username" });
+
+    if (error) throw error;
+  } catch (err) {
+    console.error("Staff directory synchronization failed:", err);
+    alert("Failed to synchronize user profiles with Supabase storage.");
+  }
+}
+
   function saveRegions(r: Region[]) { setRegions(r); db.set("regions", r); }
-  function submitBatch(jobs: Job[]) { const next=[...allJobs,...jobs]; setAllJobs(next); db.set("jobs", next); }
-  function sendMessage(m: Omit<Message,"id"|"timestamp"|"read">) { const msg: Message={...m,id:uid(),timestamp:new Date().toISOString(),read:false}; const next=[...messages,msg]; setMessages(next); db.set("messages",next); }
-  function markRead(id: string) { const next=messages.map(m=>m.id===id?{...m,read:true}:m); setMessages(next); db.set("messages",next); }
+  // 1. Securely upload batch jobs into the cloud database
+async function submitBatch(jobs: Job[]) {
+  try {
+    const { error } = await supabase.from("jobs").insert(jobs);
+    if (error) throw error;
+  } catch (err) {
+    console.error("Database save failed for jobs:", err);
+    alert("Cloud database sync failed for this job log batch.");
+  }
+}
+
+// 2. Insert text message payloads directly into the cloud messaging table
+async function sendMessage(m: Omit<Message, "id" | "timestamp" | "read">) {
+  const msg = {
+    id: uid(),
+    timestamp: new Date().toISOString(),
+    read: false,
+    from_id: m.fromId,       // Mapping your camelCase to clean database underscores
+    from_name: m.fromName,
+    from_role: m.fromRole,
+    to_id: m.toId,
+    to_name: m.toName,
+    subject: m.subject,
+    body: m.body
+  };
+
+  try {
+    const { error } = await supabase.from("messages").insert([msg]);
+    if (error) throw error;
+  } catch (err) {
+    console.error("Database message dispatch failed:", err);
+  }
+}
+
+// 3. Update read receipts remotely inside the database
+async function markRead(id: string) {
+  try {
+    const { error } = await supabase
+      .from("messages")
+      .update({ read: true })
+      .eq("id", id);
+    if (error) throw error;
+  } catch (err) {
+    console.error("Failed to mark message read status:", err);
+  }
+}
+
 
   if (!ready) return <LoadingScreen/>;
 
