@@ -13,16 +13,20 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   console.error("CRITICAL: Supabase environment variables are missing!");
 }
 
-export const supabase = createClient(SUPABASE_URL || "", SUPABASE_ANON_KEY || "");
-
 /**
- * Securely signs in a user with an email and password.
- * Supabase handles all encryption, sessions, and token management automatically.
+ * Registers a new user securely with Supabase Auth
+ * and attaches metadata that triggers automatic database syncing.
  */
-export async function secureLogin(emailInput: string, passwordInput: string) {
-  const { data, error } = await supabase.auth.signInWithPassword({
+export async function signUpUser(emailInput: string, passwordInput: string, usernameInput: string) {
+  const { data, error } = await supabase.auth.signUp({
     email: emailInput.trim(),
     password: passwordInput,
+    options: {
+      data: {
+        username: usernameInput.trim()
+      }
+    }
   });
+
   return { data, error };
 }
