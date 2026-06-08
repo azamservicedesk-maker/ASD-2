@@ -1,5 +1,43 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { supabase } from "./supabaseService"; // Or wherever your client client initializes
+import { useAuth } from './hooks/useAuth';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import AdminPanel from './pages/AdminPanel'; // Only for Single Admin
+import AnalystPage from './pages/AnalystPage'; // For Technical Analyst
+
+function App() {
+  const { session, profile, loading, isAdmin } = useAuth();
+
+  if (loading) return <div>Loading...</div>;
+
+  // If not logged in, show Login only
+  if (!session) return <Login />;
+
+  return (
+    <div className="app">
+      <nav>
+        <span>Welcome, {profile?.username} ({profile?.role})</span>
+        <button onClick={() => supabase.auth.signOut()}>Logout</button>
+      </nav>
+
+      <main>
+        {/* Basic Access: Everyone authenticated */}
+        <Dashboard />
+
+        {/* Exclusive Access: Only the Single Admin */}
+        {isAdmin && <AdminPanel />}
+
+        {/* Role Access: Technical Analysts or Admin */}
+        {(profile?.role === 'technical_analyst' || isAdmin) && (
+          <AnalystPage />
+        )}
+      </main>
+    </div>
+  );
+}
+
+export default App;
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
