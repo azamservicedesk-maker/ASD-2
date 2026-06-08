@@ -3020,13 +3020,15 @@ function LoadingScreen() {
 }
       
 export default function App() {
-  const [ready,       setReady]       = useState(false);
+  const [ready, setReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<User|null>(null);
-  const { dataItems: dbUsers } = useSynchronizedData("users_profiles");
-  const users = dbUsers.length > 0 ? dbUsers : [INITIAL_ADMIN];
-  const [regions,     setRegions]     = useState<Region[]>([]);
+  const [users, setUsers] = useState<User[]>([INITIAL_ADMIN]);
+  const [regions, setRegions] = useState<Region[]>([]);
   const { dataItems: allJobs } = useSynchronizedData("jobs");
   const { dataItems: messages } = useSynchronizedData("messages");
+  const { dataItems: dbUsers } = useSynchronizedData("users_profiles");
+  const usersList = dbUsers.length > 0 ? dbUsers : [INITIAL_ADMIN];
+
 
   useEffect(() => {
   async function loadCloudSession() {
