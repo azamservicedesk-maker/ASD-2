@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { supabase } from "./supabaseService"; // Or wherever your client client initializes
-import { useSynchronizedData } from "./hooks/useSynchronizedData";
+import { withRoleProtection, useRole } from "./hooks/useRoleProtection";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -38,6 +38,7 @@ interface User {
   id: string; name: string; username: string; password: string;
   role: string; region: string; branch?: string;
   managementType?: string; createdAt: string;
+  tag?: string;
 }
 interface Job {
   id: string; technicianId: string; technicianName: string;
@@ -644,8 +645,8 @@ function Sidebar({ user, nav, active, setActive, onLogout, mobileOpen, onMobileC
 }) {
   const isMobile = useIsMobile();
   const [collapsed, setCollapsed] = useState(false);
-  const roleLabel = user.role === "management" ? (user.managementType || "Management") : user.role === "technical_analyst" ? "Tech Analyst" : user.role;
-  const roleColor = ({admin:C.red,technician:C.blueMid,management:C.success,technical_analyst:C.teal} as Record<string,string>)[user.role] || C.blue;
+  const roleLabel = user.role === "management" ? (user.managementType || "Management") : user.role === "technical_analyst" ? "Tech Analyst" : user.role === "otc_user" ? "OTC Agent" : user.role === "otc_manager" ? "OTC Supervisor" : user.role;
+  const roleColor = ({admin:C.red,technician:C.blueMid,management:C.success,technical_analyst:C.teal,otc_user:"#EA580C",otc_manager:"#8B5CF6"} as Record<string,string>)[user.role] || C.blue;
   const initials  = user.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
 
   function handleNavClick(key: string) {
@@ -944,7 +945,7 @@ function LoginPage({ onLogin }: { onLogin: (u: User) => void }) {
             padding: "13px",
             borderRadius: 8,
             border: "none",
-            background: loading ? "#1D4ED8" : "#2563EB",
+            backgroundColor: loading ? "#1D4ED8" : "#2563EB",
             backgroundImage: "linear-gradient(180deg, #2563EB 0%, #1D4ED8 100%)",
             color: "#FFFFFF",
             fontWeight: "700",
@@ -1541,15 +1542,15 @@ function FieldJobView({ user, onSubmitBatch, regions, onMenu, hideHeader }: { us
 
   function handleSetContext(e: React.FormEvent) {
     e.preventDefault();
-    if (!ctxRegion) {
-      showToast("Please select a Region.", "error");
+    if (!ctxRegion.trim()) {
+      showToast("Please specify the Region.", "error");
       return;
     }
     if (!ctxAgent.trim()) {
       showToast("Please specify the Agent Name.", "error");
       return;
     }
-    setActiveContext({ region: ctxRegion, agentName: ctxAgent.trim() });
+    setActiveContext({ region: ctxRegion.trim(), agentName: ctxAgent.trim() });
     setRows([newJobRow()]);
     setSubmitted(false);
   }
@@ -1652,11 +1653,13 @@ function FieldJobView({ user, onSubmitBatch, regions, onMenu, hideHeader }: { us
                 </div>
                 
                 <div style={{ marginBottom:16 }}>
-                  <label style={{ ...LBL, fontSize:11, fontWeight:700 }}>Select Field Region <span style={{ color:C.red }}>*</span></label>
-                  <Sel value={ctxRegion} onChange={e=>setCtxRegion(e.target.value)} required>
-                    <option value="">— Choose Region —</option>
-                    {allRegionNames.map(r => <option key={r} value={r}>{r}</option>)}
-                  </Sel>
+                  <label style={{ ...LBL, fontSize:11, fontWeight:700 }}>Field Region <span style={{ color:C.red }}>*</span></label>
+                  <Inp 
+                    value={ctxRegion} 
+                    onChange={e=>setCtxRegion(e.target.value)} 
+                    placeholder="e.g. Dar es Salaam, Kilimanjaro, Mbeya, Zanzibar" 
+                    required 
+                  />
                 </div>
 
                 <div style={{ marginBottom:24 }}>
@@ -2747,6 +2750,7 @@ function AdminApp({ user, users, regions, allJobs, onSaveUsers, onSaveRegions, o
     {key:"data",       icon:"📋", label:"All Records"},
     {key:"analytics",  icon:"📈", label:"Analytics"},
     {key:"recurring",  icon:"🔁", label:"Recurring STBs"},
+    {key:"otc_desk",   icon:"🎟️", label:"OTC Operations"},
     {key:"card_lookup",icon:"🔎", label:"Card Lookup"},
     {key:"staff_dir",  icon:"📂", label:"Staff Directory"},
     {key:"activity",   icon:"🕓", label:"Activity Log"},
@@ -2765,6 +2769,7 @@ function AdminApp({ user, users, regions, allJobs, onSaveUsers, onSaveRegions, o
         {view==="data"        && <DataView allJobs={regularJobs} users={users} onMenu={()=>setMobileMenuOpen(true)} canDownload={user.role==="technical_analyst"}/>}
         {view==="analytics"   && <><PageHeader title="Analytics & Performance" sub={`${regularJobs.length} total records`} action={user.role==="technical_analyst" ? <Btn onClick={doExportAll} variant="ghost" size="sm">⬇ Export All</Btn> : undefined} onMenu={()=>setMobileMenuOpen(true)}/><AnalyticsView allJobs={regularJobs} users={users}/></>}
         {view==="recurring"   && <><PageHeader title="Recurring STBs" sub="Decoders returned 2+ times" onMenu={()=>setMobileMenuOpen(true)}/><div className="page-pad" style={{padding:20}}><RecurringContent allJobs={regularJobs}/></div></>}
+        {view==="otc_desk"    && <OtcManagerDashboardComponent user={user} users={users} regions={regions} allJobs={allJobs} onLogout={onLogout} onSaveUsers={onSaveUsers} onMenu={()=>setMobileMenuOpen(true)} />}
         {view==="card_lookup" && <CardLookupView allJobs={allJobs} onMenu={()=>setMobileMenuOpen(true)}/>}
         {view==="staff_dir"   && <UserExportView users={users} onMenu={()=>setMobileMenuOpen(true)}/>}
         {view==="activity"    && <ActivityLogView onMenu={()=>setMobileMenuOpen(true)}/>}
@@ -3006,7 +3011,7 @@ function TechnicalAnalystApp({ user, users, allJobs, onLogout, messages, onSendM
 
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 
-const INITIAL_ADMIN: User = { id:"ADMIN_001", name:"System Administrator", username:"admin", password:"admin123", role:"admin", region:"HQ", branch:"Headquarters", createdAt:new Date().toISOString() };
+const INITIAL_ADMIN: User = { id:"user-azamservicedesk", name:"System Admin", username:"azamservicedesk@gmail.com", password:"password", role:"admin", region:"Dar es Salaam", branch:"Central Desk", createdAt:new Date().toISOString() };
 
 function LoadingScreen() {
   return (
@@ -3020,125 +3025,81 @@ function LoadingScreen() {
 }
       
 export default function App() {
-  const [ready, setReady] = useState(false);
+  const [ready,       setReady]       = useState(false);
   const [currentUser, setCurrentUser] = useState<User|null>(null);
-  const [users, setUsers] = useState<User[]>([INITIAL_ADMIN]);
-  const [regions, setRegions] = useState<Region[]>([]);
-  const { dataItems: allJobs } = useSynchronizedData("jobs");
-  const { dataItems: messages } = useSynchronizedData("messages");
-  const { dataItems: dbUsers } = useSynchronizedData("users_profiles");
-  const usersList = dbUsers.length > 0 ? dbUsers : [INITIAL_ADMIN];
-
+  const [users,       setUsers]       = useState<User[]>([INITIAL_ADMIN]);
+  const [regions,     setRegions]     = useState<Region[]>([]);
+  const [allJobs,     setAllJobs]     = useState<Job[]>([]);
+  const [messages,    setMessages]    = useState<Message[]>([]);
 
   useEffect(() => {
-  async function loadCloudSession() {
-    try {
-      // Safely check session storage inside browser context windows
-      if (typeof window !== "undefined") {
+    async function loadCloudSession() {
+      try {
         const savedUid = loadSession();
+        // Retrieve and sync users from the backend list
+        const usersRes = await fetch("/api/users");
+        if (usersRes.ok) {
+          const uData = await usersRes.json();
+          if (uData && Array.isArray(uData.users)) {
+            // Deduplicate to guarantee absolute uniqueness of user keys
+            const unique: User[] = [];
+            const seen = new Set<string>();
+            for (const usr of uData.users) {
+              if (usr && usr.id && !seen.has(usr.id)) {
+                seen.add(usr.id);
+                unique.push(usr);
+              }
+            }
+            setUsers(unique);
+            db.set("users", unique);
+          }
+        }
 
         if (savedUid) {
-          // Fetch verified profile records directly from your live table matrix
-          const { data, error } = await supabase
-            .from("users_profiles")
-            .select("*")
-            .eq("id", savedUid)
-            .maybeSingle();
-
-          if (data && !error) {
-            setCurrentUser(data);
+          // Verify session via API
+          const res = await fetch(`/api/users/profile?id=${savedUid}`);
+          if (res.ok) {
+            const data = await res.json();
+            setCurrentUser(data.user || data);
           } else {
             clearSession();
           }
         }
+      } catch (err) {
+        console.error("Session sync failed:", err);
+      } finally {
+        setReady(true);
       }
+    }
+    loadCloudSession();
+  }, []);
+
+
+  async function saveUsers(u: User[]) {
+    const unique: User[] = [];
+    const seen = new Set<string>();
+    for (const usr of u) {
+      if (usr && usr.id && !seen.has(usr.id)) {
+        seen.add(usr.id);
+        unique.push(usr);
+      }
+    }
+    setUsers(unique);
+    db.set("users", unique);
+    try {
+      await fetch("/api/users/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ users: unique })
+      });
     } catch (err) {
-      console.error("Session initialization failure:", err);
-    } finally {
-      setReady(true);
+      console.error("Failed to sync users to backend:", err);
     }
   }
-  loadCloudSession();
-}, []);
-
-  // 👥 Dynamically sync user adjustments straight into the database table rows
-async function saveUsers(u: User[]) {
-  try {
-    // We grab the last added or updated user profile in the sequence array
-    const targetUser = u[u.length - 1];
-    if (!targetUser) return;
-
-    const payload = {
-      id: targetUser.id,
-      created_at: targetUser.createdAt || new Date().toISOString(),
-      name: targetUser.name,
-      username: targetUser.username,
-      password: targetUser.password, // Keeps your client-side text hashes intact
-      role: targetUser.role,
-      region: targetUser.region || "HQ",
-      branch: targetUser.branch || "",
-      managementType: targetUser.managementType || ""
-    };
-
-    const { error } = await supabase
-      .from("users_profiles")
-      .upsert([payload], { onConflict: "username" });
-
-    if (error) throw error;
-  } catch (err) {
-    console.error("Staff directory synchronization failed:", err);
-    alert("Failed to synchronize user profiles with Supabase storage.");
-  }
-}
-
   function saveRegions(r: Region[]) { setRegions(r); db.set("regions", r); }
-  // 1. Securely upload batch jobs into the cloud database
-async function submitBatch(jobs: Job[]) {
-  try {
-    const { error } = await supabase.from("jobs").insert(jobs);
-    if (error) throw error;
-  } catch (err) {
-    console.error("Database save failed for jobs:", err);
-    alert("Cloud database sync failed for this job log batch.");
-  }
-}
-
-// 2. Insert text message payloads directly into the cloud messaging table
-async function sendMessage(m: Omit<Message, "id" | "timestamp" | "read">) {
-  const msg = {
-    id: uid(),
-    timestamp: new Date().toISOString(),
-    read: false,
-    from_id: m.fromId,       // Mapping your camelCase to clean database underscores
-    from_name: m.fromName,
-    from_role: m.fromRole,
-    to_id: m.toId,
-    to_name: m.toName,
-    subject: m.subject,
-    body: m.body
-  };
-
-  try {
-    const { error } = await supabase.from("messages").insert([msg]);
-    if (error) throw error;
-  } catch (err) {
-    console.error("Database message dispatch failed:", err);
-  }
-}
-
-// 3. Update read receipts remotely inside the database
-async function markRead(id: string) {
-  try {
-    const { error } = await supabase
-      .from("messages")
-      .update({ read: true })
-      .eq("id", id);
-    if (error) throw error;
-  } catch (err) {
-    console.error("Failed to mark message read status:", err);
-  }
-}
-
+  function submitBatch(jobs: Job[]) { const next=[...allJobs,...jobs]; setAllJobs(next); db.set("jobs", next); }
+  function sendMessage(m: Omit<Message,"id"|"timestamp"|"read">) { const msg: Message={...m,id:uid(),timestamp:new Date().toISOString(),read:false}; const next=[...messages,msg]; setMessages(next); db.set("messages",next); }
+  function markRead(id: string) { const next=messages.map(m=>m.id===id?{...m,read:true}:m); setMessages(next); db.set("messages",next); }
 
   if (!ready) return <LoadingScreen/>;
 
@@ -3162,7 +3123,7 @@ async function markRead(id: string) {
   return (
     <>
       <ToastContainer/>
-      {freshUser.role === "otc_manager" && <OtcManagerDashboard {...base} />}
+      {freshUser.role === "otc_manager" && <OtcManagerDashboard {...base} onSaveUsers={saveUsers} />}
       {freshUser.role === "otc_user" && <OtcUserForm {...base} />}
       {freshUser.role==="admin"             && <AdminApp {...base} {...msgProps} onSaveUsers={saveUsers} onSaveRegions={saveRegions} onSubmitBatch={submitBatch}/>}
       {freshUser.role==="technician"        && <TechnicianApp {...base} {...msgProps} onSubmitBatch={submitBatch}/>}
@@ -3182,96 +3143,1370 @@ async function markRead(id: string) {
 }
 
 
-// ─── OTC USER FORM DESK PANEL ───
-function OtcUserForm({ user, onLogout }: any) {
-  const [tab, setTab] = useState("name");
-  const [formData, setFormData] = useState({ name: "", phone: "", card: "", problem: "" });
+// ─── SQL SCHEMA SETUP HELPER FOR OTC TABLES ───
+function SupabaseSetupHelper() {
+  const [open, setOpen] = useState(false);
+  const sql = `-- Step 1: Ensure UUID extension is active\n` +
+    `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";\n\n` +
+    `-- Step 2: Create 'otc_jobs' table\n` +
+    `CREATE TABLE IF NOT EXISTS otc_jobs (\n` +
+    `  id VARCHAR(255) PRIMARY KEY,\n` +
+    `  name VARCHAR(255) NOT NULL,\n` +
+    `  phone_number VARCHAR(100) NOT NULL,\n` +
+    `  card_number VARCHAR(100) NOT NULL,\n` +
+    `  problem TEXT NOT NULL,\n` +
+    `  status VARCHAR(50) DEFAULT 'pending' NOT NULL CHECK (status IN ('pending', 'done')),\n` +
+    `  source VARCHAR(50) DEFAULT 'OTC' NOT NULL,\n` +
+    `  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,\n` +
+    `  repaired_by VARCHAR(255) DEFAULT NULL,\n` +
+    `  repaired_at TIMESTAMP WITH TIME ZONE DEFAULT NULL\n` +
+    `);\n\n` +
+    `-- Step 3: Enable realtime subscriptions\n` +
+    `ALTER PUBLICATION supabase_realtime ADD TABLE otc_jobs;`;
 
-  const submitJob = async () => {
-    if (!formData.name || !formData.phone || !formData.card || !formData.problem) {
-      alert("Please fill out all tabs before submitting!");
-      return;
-    }
-    const res = await fetch("/api/jobs/batch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jobs: [{
-          id: `${Date.now()}`,
-          technicianId: user.id,
-          technicianName: user.name,
-          region: user.region || "HQ",
-          branch: "TAZARA",
-          date: new Date().toISOString().split("T")[0],
-          submittedAt: new Date().toISOString(),
-          status: "Pending",
-          customerName: formData.name,
-          phone: formData.phone,
-          cardNumber: formData.card,
-          faultType: formData.problem,
-          modelNumber: "OTC-DECODER",
-          result: "Pending",
-          replacement: "No"
-        }]
-      })
-    });
-    if (res.ok) {
-      alert("Success! Job registered with a Pending marker.");
-      setFormData({ name: "", phone: "", card: "", problem: "" });
-      setTab("name");
-    } else {
-      alert("Error saving to cloud database.");
-    }
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(sql);
+    showToast("Setup SQL copied to clipboard!", "success");
   };
 
   return (
-    <div style={{ padding: 24, fontFamily: "sans-serif", maxWidth: 500, margin: "auto", background: "#fff", borderRadius: 8, marginTop: 40, boxShadow: "0 4px 10px rgba(0,0,0,0.1)" }}>
-      <h2 style={{ color: "#0056b3" }}>OTC Customer Service Desk (TAZARA HQ)</h2>
-      <div style={{ display: "flex", gap: 5, marginBottom: 20 }}>
-        {["name", "phone", "card", "problem"].map(t => (
-          <button key={t} onClick={() => setTab(t)} type="button" style={{ flex: 1, padding: 10, background: tab === t ? "#0056b3" : "#eee", color: tab === t ? "#fff" : "#000", border: "none", fontWeight: "bold", borderRadius: 4 }}>{t.toUpperCase()}</button>
-        ))}
+    <div style={{ background: "#FEF3C7", border: "1.5px solid #FCD34D", borderRadius: 12, padding: "16px 20px", marginBottom: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 900, color: "#92400E", display: "flex", alignItems: "center", gap: 6 }}>
+            <span>🛠️</span> Supabase Tables Not Fully Initialized ('otc_jobs' missing)
+          </h4>
+          <p style={{ margin: "4px 0 0 0", fontSize: 11, color: "#B45309", lineHeight: 1.5 }}>
+            You have connected your Supabase environment, but the database table <strong>otc_jobs</strong> does not exist. 
+            The system is safely running on memory storage as a high-reliability fallback. Put this template in full-sync mode by provisioning your database:
+          </p>
+        </div>
+        <Btn onClick={() => setOpen(!open)} variant="ghost" size="sm" style={{ background: "#FFF", borderColor: "#FCD34D", color: "#92400E", padding: "6px 12px" }}>
+          {open ? "Close Guide" : "🔧 View SQL Solution"}
+        </Btn>
       </div>
-      {tab === "name" && <input value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="Enter Customer Name" style={{ width: "100%", padding: 12, boxSizing: "border-box", marginBottom: 15, border: "1px solid #ccc", borderRadius: 4 }} />}
-      {tab === "phone" && <input value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} placeholder="Enter Phone Number" style={{ width: "100%", padding: 12, boxSizing: "border-box", marginBottom: 15, border: "1px solid #ccc", borderRadius: 4 }} />}
-      {tab === "card" && <input value={formData.card} onChange={e => setFormData({ ...formData, card: e.target.value })} placeholder="Enter Card Number" style={{ width: "100%", padding: 12, boxSizing: "border-box", marginBottom: 15, border: "1px solid #ccc", borderRadius: 4 }} />}
-      {tab === "problem" && (
-        <div>
-          <textarea value={formData.problem} onChange={e => setFormData({ ...formData, problem: e.target.value })} placeholder="Describe Decoder Fault Details..." style={{ width: "100%", padding: 12, height: 100, boxSizing: "border-box", border: "1px solid #ccc", borderRadius: 4 }} />
-          <button onClick={submitJob} type="button" style={{ width: "100%", padding: 12, marginTop: 15, background: "#28a745", color: "#fff", border: "none", fontWeight: "bold", borderRadius: 4, cursor: "pointer" }}>Submit Pending Job 🚀</button>
+
+      {open && (
+        <div style={{ marginTop: 14, borderTop: "1px dashed #FCD34D", paddingTop: 14 }}>
+          <p style={{ margin: "0 0 10px 0", fontSize: 11, color: "#78350F", fontWeight: 500 }}>
+            Follow these simple steps: <br />
+            1. Click the button below to copy the SQL setup definition to clipboard. <br />
+            2. Go to your <strong>Supabase Dashboard &rarr; SQL Editor</strong> &rarr; Click <strong>New Query</strong>.<br />
+            3. Paste the contents and click <strong>Run</strong>. Real-time synchronizations will activate instantly!
+          </p>
+          <div style={{ position: "relative", background: "#1E293B", padding: "14px", borderRadius: 8, marginTop: 8 }}>
+            <pre style={{ margin: 0, fontSize: 11, color: "#94A3B8", fontFamily: "monospace", overflowX: "auto", whiteSpace: "pre-wrap", lineHeight: 1.4 }}>
+              {sql}
+            </pre>
+            <button 
+              onClick={copyToClipboard}
+              style={{ position: "absolute", top: 10, right: 10, background: "#334155", color: "#FFF", border: "none", borderRadius: 6, padding: "6px 10px", fontSize: 10, fontWeight: "bold", cursor: "pointer", transition: "background 0.15s" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#475569"}
+              onMouseLeave={e => e.currentTarget.style.background = "#334155"}
+            >
+              📋 Copy SQL
+            </button>
+          </div>
         </div>
       )}
-      <button onClick={onLogout} type="button" style={{ marginTop: 20, width: "100%", padding: 10, background: "#6c757d", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>Sign Out</button>
+    </div>
+  );
+}
+
+// ─── OTC USER FORM DESK PANEL ───
+function OtcUserFormComponent({ user, users, regions, allJobs, onLogout }: { user: User; users: User[]; regions: Region[]; allJobs: Job[]; onLogout: () => void }) {
+  const [view, setView] = useState("create_ticket");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [tab, setTab] = useState<"credentials" | "problem">("credentials");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [card, setCard] = useState("");
+  const [problem, setProblem] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  
+  const [myTickets, setMyTickets] = useState<any[]>([]);
+  const [loadingTickets, setLoadingTickets] = useState(false);
+  const [tableMissing, setTableMissing] = useState(false);
+  const [ticketSearch, setTicketSearch] = useState("");
+  const isMobile = useIsMobile();
+
+  const nav = [
+    {key: "create_ticket", icon: "🎟️", label: "Create OTC Ticket"},
+    {key: "tickets_tracker", icon: "📋", label: "Desk Log Tracker", badge: myTickets.filter(t => t.status === "pending").length},
+    {key: "card_lookup", icon: "🔎", label: "Decoder Card Lookup"},
+    {key: "user_profile", icon: "👤", label: "Desk Profile"}
+  ];
+
+  const fetchMyTickets = useCallback(async () => {
+    setLoadingTickets(true);
+    try {
+      const res = await fetch("/api/otc/jobs");
+      if (res.ok) {
+        const result = await res.json();
+        setMyTickets(result.data || []);
+        if (result.tableMissing === "otc_jobs") {
+          setTableMissing(true);
+        } else {
+          setTableMissing(false);
+        }
+      }
+    } catch (err) {
+      console.error("Error loading tickets:", err);
+    } finally {
+      setLoadingTickets(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMyTickets();
+    const interval = setInterval(fetchMyTickets, 5000);
+    return () => clearInterval(interval);
+  }, [fetchMyTickets]);
+
+  const handleSubmit = async () => {
+    if (!name.trim()) { showToast("Customer Name is required.", "error"); return; }
+    if (!phone.trim()) { showToast("Phone Number is required.", "error"); return; }
+    if (!card.trim()) { showToast("Card Number is required.", "error"); return; }
+    if (!problem.trim()) { showToast("Problem Description is required.", "error"); return; }
+
+    setSubmitting(true);
+    try {
+      const payload = {
+        id: "otc-" + uid(),
+        name: name.trim(),
+        phone_number: phone.trim(),
+        card_number: card.trim(),
+        problem: problem.trim(),
+        created_at: new Date().toISOString()
+      };
+
+      const res = await fetch("/api/otc/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job: payload })
+      });
+
+      if (res.ok) {
+        showToast("OTC Desk Ticket registered successfully!", "success");
+        setName("");
+        setPhone("");
+        setCard("");
+        setProblem("");
+        setTab("credentials");
+        setView("tickets_tracker");
+        fetchMyTickets();
+      } else {
+        const errData = await res.json();
+        showToast(errData.error || "Failed to submit OTC ticket.", "error");
+      }
+    } catch (err) {
+      showToast("Connection failure during ticket creation.", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const filteredTickets = useMemo(() => {
+    return myTickets.filter(tc => {
+      if (!ticketSearch.trim()) return true;
+      const q = ticketSearch.toLowerCase();
+      return (
+        tc.name?.toLowerCase().includes(q) ||
+        tc.phone_number?.toLowerCase().includes(q) ||
+        tc.card_number?.toLowerCase().includes(q) ||
+        tc.problem?.toLowerCase().includes(q) ||
+        tc.status?.toLowerCase().includes(q)
+      );
+    });
+  }, [myTickets, ticketSearch]);
+
+  const tickets_pending = myTickets.filter(tc => tc.status === "pending").length;
+  const tickets_done = myTickets.filter(tc => tc.status === "done").length;
+
+  return (
+    <div className="app-layout" style={{ fontFamily: "'DM Sans', sans-serif", background: C.bg }}>
+      <Sidebar user={user} nav={nav} active={view} setActive={setView} onLogout={onLogout} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
+      
+      <div className="app-main">
+        {/* Main Switcher based on Nav */}
+        {view === "create_ticket" && (
+          <>
+            <PageHeader 
+              title="🎟️ Create OTC Ticket" 
+              sub="Register walk-in customer service logs for physical troubleshooting" 
+              onMenu={() => setMobileMenuOpen(true)}
+            />
+            <div className="page-pad" style={{ padding: 24, maxWidth: 680, margin: "0 auto" }}>
+              {tableMissing && <SupabaseSetupHelper />}
+              
+              <Card style={{ padding: 0, overflow: "hidden", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05)" }}>
+                <div style={{ background: `linear-gradient(135deg, ${C.blueDark}, ${C.blue})`, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ color: "rgba(255,255,255,.55)", fontSize: 10, textTransform: "uppercase", letterSpacing: 2, fontWeight: 700 }}>OVER-THE-COUNTER SERVICE TICKET</div>
+                    <div style={{ color: "#fff", fontSize: 18, fontWeight: 700, marginTop: 2, fontFamily: "'Barlow Condensed',sans-serif", letterSpacing: .5 }}>Azam TV Service Desk</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ color: "rgba(255,255,255,.5)", fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>OTC Agent</div>
+                    <div style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>{user.name}</div>
+                  </div>
+                </div>
+
+                <div style={{ padding: "14px 20px", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", borderBottom: `1px solid ${C.border}`, background: "#F8FAFC" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: .8, whiteSpace: "nowrap" }}>Ticket Date:</label>
+                    <Inp type="date" value={new Date().toISOString().split("T")[0]} disabled style={{ width: "auto" }} />
+                  </div>
+                  <div style={{ flex: 1, color: C.muted, fontSize: 12 }}>📍 Agent Station: {user.branch || "Central Desk"} · {user.region}</div>
+                </div>
+
+                <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
+                    <div>
+                      <label style={LBL}>Customer Full Name *</label>
+                      <Inp value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Kassim Benson" />
+                    </div>
+                    <div>
+                      <label style={LBL}>Contact Phone Number *</label>
+                      <Inp value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g. +255 715 009 231" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={LBL}>Decoder Smartcard / STB Number *</label>
+                    <Inp value={card} onChange={e => setCard(e.target.value)} placeholder="e.g. 6009-4412-1094" />
+                    <p style={{ margin: "4px 0 0 0", color: C.muted, fontSize: 10 }}>If a matching log with this card is submitted by a technician, this ticket auto-completes.</p>
+                  </div>
+
+                  <div>
+                    <label style={LBL}>Fault Problem Description *</label>
+                    <textarea
+                      value={problem}
+                      onChange={e => setProblem(e.target.value)}
+                      placeholder="Describe the complaint (e.g. Blinking red light; STB system rebooting; Smartcard mute error; No signal)"
+                      style={{
+                        width: "100%", height: 110, padding: 12, borderRadius: 8,
+                        border: `1.5px solid ${C.border}`, fontFamily: "inherit", fontSize: 13,
+                        outline: "none", boxSizing: "border-box"
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 18, display: "flex", justifyContent: "flex-end" }}>
+                    <Btn 
+                      onClick={handleSubmit} 
+                      disabled={submitting} 
+                      variant="success" 
+                      style={{ minWidth: 200 }}
+                    >
+                      {submitting ? "Submitting..." : "Submit OTC Ticket 🚀"}
+                    </Btn>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </>
+        )}
+
+        {view === "tickets_tracker" && (
+          <>
+            <PageHeader 
+              title="📋 OTC Desk Log Tracker" 
+              sub="Real-time ticket updates synced with service desk database" 
+              action={
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Badge color="orange">{tickets_pending} Pending</Badge>
+                  <Badge color="green">{tickets_done} Resolved</Badge>
+                </div>
+              }
+              onMenu={() => setMobileMenuOpen(true)}
+            />
+            <div className="page-pad" style={{ padding: 24, maxWidth: 960, margin: "0 auto" }}>
+              {tableMissing && <SupabaseSetupHelper />}
+              
+              <Card style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <Inp 
+                    value={ticketSearch} 
+                    onChange={e => setTicketSearch(e.target.value)} 
+                    placeholder="Search your desk tickets (customer name, card number, phone, problem status)..." 
+                    style={{ flex: 1 }}
+                  />
+                  {ticketSearch && <Btn onClick={() => setTicketSearch("")} variant="ghost" size="sm">Clear</Btn>}
+                </div>
+              </Card>
+
+              {loadingTickets && filteredTickets.length === 0 ? (
+                <div style={{ padding: 60, textAlign: "center", color: C.muted }}>Loading entries...</div>
+              ) : filteredTickets.length === 0 ? (
+                <Card>
+                  <EmptyState icon="📭" msg={ticketSearch ? `No tickets found matching "${ticketSearch}"` : "No OTC jobs registered yet."} />
+                </Card>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {filteredTickets.map((tc: any) => (
+                    <Card
+                      key={tc.id}
+                      style={{
+                        border: `1.5px solid ${C.border}`, borderRadius: 10, padding: 16,
+                        background: "#fff", transition: "transform 0.15s ease",
+                        position: "relative"
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                        <div>
+                          <span style={{ fontWeight: 800, fontSize: 14, color: C.text }}>{tc.name}</span>
+                          <span style={{ marginLeft: 8, fontSize: 11, color: C.muted }}>☎ {tc.phone_number}</span>
+                        </div>
+                        <Badge color={tc.status === "pending" ? "orange" : "green"}>
+                          {tc.status === "pending" ? "⏳ Awaiting Repair" : "✓ Done / Repaired"}
+                        </Badge>
+                      </div>
+
+                      <div style={{ fontFamily: "monospace", fontSize: 11, color: C.blue, fontWeight: 700, margin: "2px 0 8px 0" }}>
+                        STB/DECODER CARD ID: {tc.card_number}
+                      </div>
+
+                      <div style={{ background: "#F8FAFC", padding: 12, borderRadius: 8, border: `1px solid ${C.border}`, fontSize: 13, color: C.text, lineHeight: 1.4 }}>
+                        <span style={{ fontWeight: 600, fontSize: 11, color: C.muted, textTransform: "uppercase", display: "block", marginBottom: 2 }}>Customer Complaint</span>
+                        "{tc.problem}"
+                      </div>
+                      
+                      {tc.status === "done" && (
+                        <div style={{ marginTop: 12, padding: "10px 14px", background: "#F0FDF4", borderRadius: 8, border: "1px solid #DCFCE7", fontSize: 11, color: C.success }}>
+                          🔒 <strong>Cross-Matched & Closed:</strong> Repaired by <strong>{tc.repaired_by || "System Technician"}</strong> on {tc.repaired_at ? fmtDate(tc.repaired_at) : "Done"}
+                        </div>
+                      )}
+                      
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 10, color: "rgba(0,0,0,0.35)", marginTop: 12 }}>
+                        <span>Source: {tc.source || "OTC Service Desk"}</span>
+                        <span>Registered: {fmtDate(tc.created_at)}</span>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {view === "card_lookup" && (
+          <CardLookupView allJobs={allJobs} onMenu={() => setMobileMenuOpen(true)} />
+        )}
+
+        {view === "user_profile" && (
+          <>
+            <PageHeader 
+              title="👤 Desk Agent Profile" 
+              sub="Management and station allocation data parameters" 
+              onMenu={() => setMobileMenuOpen(true)}
+            />
+            <div className="page-pad" style={{ padding: 24, maxWidth: 600, margin: "0 auto" }}>
+              <Card style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ background: `linear-gradient(135deg, ${C.blueDark}, ${C.blue})`, padding: "24px", textAlign: "center", color: "#fff" }}>
+                  <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#EA580C", color: "#FFF", fontSize: 26, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px auto" }}>
+                    {user.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{user.name}</h3>
+                  <div style={{ marginTop: 6 }}><span style={{ background: "#EA580C", color: "#FFF", fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 20, textTransform: "uppercase" }}>Over-The-Counter Desk Agent</span></div>
+                </div>
+                <div style={{ padding: 20 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>SYSTEM USERNAME</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{user.username}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>ALLOCATED REGION</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>📍 {user.region || "HQ Desk"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>STATION / BRANCH</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>🏢 {user.branch || "Central Division"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>ACCOUNT REGISTERED</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{fmtDate(user.createdAt)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>DESK ACTIVITY</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{myTickets.length} Customer Tickets Created</span>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 24, borderTop: `1px solid ${C.border}`, paddingTop: 16, textAlign: "center" }}>
+                    <Btn onClick={onLogout} variant="ghost" style={{ width: "100%", color: "#CC1B1B", borderColor: "#FCA5A5" }}>↩ Log out of Desk Account</Btn>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
 // ─── OTC MANAGER DASHBOARD PANEL ───
-function OtcManagerDashboard({ onLogout }: any) {
-  const [logs, setLogs] = useState([]);
+function OtcManagerDashboardComponent({ user, users, regions, allJobs, onLogout, onSaveUsers, onMenu }: { user: User; users: User[]; regions: Region[]; allJobs: Job[]; onLogout: () => void; onSaveUsers?: (u: User[]) => void; onMenu?: () => void }) {
+  const [view, setView] = useState("manager_dashboard");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [tableMissing, setTableMissing] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const isMobile = useIsMobile();
+
+  // Profile Tag manually input state configuration
+  const [profileTag, setProfileTag] = useState(user.tag || "");
 
   useEffect(() => {
-    fetch("/api/jobs")
-      .then(res => res.json())
-      .then(data => setLogs(data.data || []))
-      .catch(err => console.error(err));
+    if (user.tag !== undefined) {
+      setProfileTag(user.tag || "");
+    }
+  }, [user.tag]);
+
+  const handleSaveProfileTag = () => {
+    if (!onSaveUsers) {
+      showToast("User updates are unavailable.", "error");
+      return;
+    }
+    const updatedUsers = users.map(u => u.id === user.id ? { ...u, tag: profileTag.trim() } : u);
+    onSaveUsers(updatedUsers);
+    showToast(`Your profile dispatch tag has been updated to '${profileTag.trim()}'`, "success");
+  };
+
+  // Supervisor Action Dialog / Controls State
+  const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
+  const [assignTechId, setAssignTechId] = useState("");
+  const [customTechName, setCustomTechName] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const fetchOtcJobs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/otc/jobs");
+      if (res.ok) {
+        const result = await res.json();
+        setLogs(result.data || []);
+        if (result.tableMissing === "otc_jobs") {
+          setTableMissing(true);
+        } else {
+          setTableMissing(false);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load OTC manager jobs:", err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  return (
-    <div style={{ padding: 24, fontFamily: "sans-serif", background: "#f8f9fa", minHeight: "100vh" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #ccc", paddingBottom: 10 }}>
-        <h2>OTC Manager Dashboard</h2>
-        <button onClick={onLogout} type="button" style={{ padding: "10px 20px", background: "#dc3545", color: "#fff", border: "none", borderRadius: 4, fontWeight: "bold", cursor: "pointer" }}>Sign Out</button>
-      </div>
-      <div style={{ marginTop: 20 }}>
-        <h3>Grouped Worklogs (Date & Technician format)</h3>
-        {logs.length === 0 ? <p>No registered jobs found in Supabase database storage.</p> : logs.map((j: any) => (
-          <div key={j.id} style={{ border: "1px solid #ddd", padding: 15, marginBottom: 10, borderRadius: 6, background: "#fff" }}>
-            <strong>Date: {j.date}</strong> | Tech: {j.technicianName} | Location: {j.branch} | Status: <span style={{ color: j.status === "Pending" ? "orange" : "green", fontWeight: "bold" }}>{j.status}</span>
-            <p style={{ margin: "8px 0 0 0", color: "#555" }}>Customer: <strong>{j.customerName}</strong> ({j.cardNumber}) - Fault: <em>{j.faultType}</em></p>
+  useEffect(() => {
+    fetchOtcJobs();
+
+    // High Real-time responsiveness: Pull update details every 4 seconds as backup fallback
+    const interval = setInterval(fetchOtcJobs, 4000);
+
+    // Supabase Real-Time Event Subscription (Active Database Connection)
+    let channel: any = null;
+    if (supabase) {
+      console.log("Subscribing to real-time events on Supabase table 'otc_jobs'...");
+      channel = supabase
+        .channel("otc-jobs-manager")
+        .on("postgres_changes", { event: "*", schema: "public", table: "otc_jobs" }, () => {
+          console.log("Real-time trigger caught! Synchronizing state...");
+          fetchOtcJobs();
+        })
+        .subscribe();
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (supabase && channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [fetchOtcJobs]);
+
+  // Statistics calculation
+  const stats = useMemo(() => {
+    const total = logs.length;
+    const pending = logs.filter(j => j.status === "pending").length;
+    const done = logs.filter(j => j.status === "done").length;
+    const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { total, pending, done, rate };
+  }, [logs]);
+
+  const nav = [
+    {key: "manager_dashboard", icon: "📊", label: "OTC Control Panel"},
+    {key: "otc_analytics",     icon: "📈", label: "Performance Analytics"},
+    {key: "manage_tickets",     icon: "⚙️", label: "Supervisory Center", badge: stats.pending},
+    {key: "otc_staff_dir",      icon: "📂", label: "Technician Roster"},
+    ...(user.role !== "admin" ? [{key: "user_profile",       icon: "👤", label: "Supervisor Profile"}] : [])
+  ];
+
+  // Primary grouping by Date, Secondary grouping by Technician who repaired on that date
+  const groupedJobs = useMemo(() => {
+    const result: Record<string, Record<string, any[]>> = {};
+
+    const filtered = logs.filter((j: any) => {
+      if (!j) return false;
+      const q = search.toLowerCase();
+      return (
+        !search ||
+        j.name?.toLowerCase().includes(q) ||
+        j.phone_number?.toLowerCase().includes(q) ||
+        j.card_number?.toLowerCase().includes(q) ||
+        j.problem?.toLowerCase().includes(q) ||
+        j.status?.toLowerCase().includes(q) ||
+        (j.repaired_by && j.repaired_by.toLowerCase().includes(q))
+      );
+    });
+
+    filtered.forEach((j: any) => {
+      const dateKey = j.created_at ? j.created_at.split("T")[0] : "No Date";
+      const techKey = j.status === "done" ? (j.repaired_by || "System Technician") : "⏳ Pending Assignment";
+
+      if (!result[dateKey]) {
+        result[dateKey] = {};
+      }
+      if (!result[dateKey][techKey]) {
+        result[dateKey][techKey] = [];
+      }
+      result[dateKey][techKey].push(j);
+    });
+
+    // Sort dates descending
+    return Object.keys(result)
+      .sort((a, b) => b.localeCompare(a))
+      .reduce((acc, dateKey) => {
+        acc[dateKey] = result[dateKey];
+        return acc;
+      }, {} as Record<string, Record<string, any[]>>);
+  }, [logs, search]);
+
+  const problemFrequencies = useMemo(() => {
+    const counts: Record<string, number> = {};
+    logs.forEach(j => {
+      const p = j.problem || "";
+      let category = "Decoder Signal Issue";
+      if (p.toLowerCase().includes("red") || p.toLowerCase().includes("blink") || p.toLowerCase().includes("power") || p.toLowerCase().includes("boot")) {
+        category = "Hardware Power Failure";
+      } else if (p.toLowerCase().includes("card") || p.toLowerCase().includes("smart") || p.toLowerCase().includes("mute") || p.toLowerCase().includes("error")) {
+        category = "Smartcard Authentication Error";
+      } else if (p.toLowerCase().includes("remote") || p.toLowerCase().includes("button")) {
+        category = "Remote Accessory Fault";
+      } else if (p.toLowerCase().includes("activation") || p.toLowerCase().includes("package") || p.toLowerCase().includes("pay")) {
+        category = "Billing & Subscription Deficit";
+      }
+      counts[category] = (counts[category] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a,b)=> b.count - a.count);
+  }, [logs]);
+
+  // Execute manual supervisor status override
+  const handleSupervisorResolve = async (ticketId: string) => {
+    if (!ticketId) return;
+    let technicianName = customTechName.trim();
+    if (assignTechId) {
+      const found = users.find(u => u.id === assignTechId);
+      if (found) technicianName = found.name;
+    }
+    if (!technicianName) {
+      technicianName = "HQ Service Manager Override";
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await fetch("/api/otc/jobs/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          id: ticketId, 
+          status: "done", 
+          repaired_by: technicianName,
+          repaired_at: new Date().toISOString()
+        })
+      });
+
+      if (res.ok) {
+        showToast("Ticket status manually updated and marked resolved!", "success");
+        setSelectedTicket(null);
+        setAssignTechId("");
+        setCustomTechName("");
+        fetchOtcJobs();
+      } else {
+        showToast("Failed to override ticket status.", "error");
+      }
+    } catch {
+      showToast("Error updating ticket details.", "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Delete incorrect walk-in entries
+  const handleSupervisorDelete = async (ticketId: string) => {
+    if (!window.confirm("Are you sure you want to permanently delete this OTC desk ticket?")) return;
+    
+    setActionLoading(true);
+    try {
+      const res = await fetch("/api/otc/jobs/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: ticketId })
+      });
+
+      if (res.ok) {
+        showToast("OTC desk ticket permanently deleted.", "success");
+        setSelectedTicket(null);
+        fetchOtcJobs();
+      } else {
+        showToast("Error deleting ticket.", "error");
+      }
+    } catch {
+      showToast("Connection failure during deletion.", "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleExportCSV = () => {
+    if (logs.length === 0) {
+      showToast("No OTC jobs data to export.", "error");
+      return;
+    }
+    let csv = "ID,Customer Name,Phone Number,Smartcard ID,Symptom,Status,Registered At,Repaired By,Repaired At\n";
+    logs.forEach(tc => {
+      csv += `"${tc.id}","${(tc.name||"").replace(/"/g, '""')}","${tc.phone_number||""}","${tc.card_number||""}","${(tc.problem||"").replace(/"/g, '""')}","${tc.status || "pending"}","${tc.created_at || ""}","${tc.repaired_by || ""}","${tc.repaired_at || ""}"\n`;
+    });
+    
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `OTC_Desk_Submissions_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("Exported OTC datasets successfully!", "success");
+  };
+
+  const handleExportPDF = () => {
+    const filtered = logs.filter((tc: any) => {
+      const tcDateStr = tc.created_at ? tc.created_at.split("T")[0] : "";
+      if (startDate && tcDateStr < startDate) return false;
+      if (endDate && tcDateStr > endDate) return false;
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      showToast("No OTC jobs data found in the selected date range.", "error");
+      return;
+    }
+
+    const rows = filtered.map((tc: any) => ({
+      ...tc,
+      dateStr: tc.created_at ? fmtDate(tc.created_at) : "—",
+      statusDisplay: tc.status === "done" ? "✅ Resolved / Closed" : "⏳ Pending Repair",
+      repaired_by_display: tc.repaired_by ? tc.repaired_by : "Awaiting Assignment"
+    }));
+
+    pdfExport(
+      "Azam TV — OTC Desk Service Report",
+      `Date Range: ${startDate ? fmtDate(startDate) : "Beginning"} to ${endDate ? fmtDate(endDate) : "Present"} · ${filtered.length} total records`,
+      [
+        { key: "dateStr", label: "Date Registered" },
+        { key: "name", label: "Customer Name" },
+        { key: "phone_number", label: "Phone Number" },
+        { key: "card_number", label: "Card / STB ID" },
+        { key: "problem", label: "Complaint" },
+        { key: "statusDisplay", label: "Status" },
+        { key: "repaired_by_display", label: "Repaired By" }
+      ],
+      rows as Record<string, unknown>[]
+    );
+
+    setExportModalOpen(false);
+    showToast(`PDF Report generated successfully with ${filtered.length} records!`, "success");
+  };
+
+  const managerTag = user.role === "admin" ? "" : (user.tag || "").trim();
+  const technicians = users.filter(u => {
+    if (u.role !== "technician") return false;
+    if (user.role === "otc_manager" && managerTag) {
+      const isHQ = u.branch?.toUpperCase() === "HEADQUARTERS" || u.branch?.toUpperCase() === "HQ" || u.region?.toUpperCase() === "HQ";
+      const matchesTag = u.tag?.toLowerCase() === managerTag.toLowerCase();
+      return isHQ && matchesTag;
+    }
+    return true;
+  });
+
+  const content = (
+    <>
+      {exportModalOpen && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(10, 22, 40, 0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+          padding: 16,
+          backdropFilter: "blur(4px)"
+        }}>
+          <div style={{
+            background: "#FFF",
+            width: "100%",
+            maxWidth: 440,
+            borderRadius: 16,
+            overflow: "hidden",
+            boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)",
+            border: `1px solid ${C.border}`
+          }}>
+            <div style={{
+              background: `linear-gradient(135deg, ${C.blueDark}, ${C.blue})`,
+              padding: "18px 24px",
+              color: "#FFF"
+            }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: 0.5 }}>📋 SELECT REPORT DATE RANGE</h3>
+              <p style={{ margin: "4px 0 0 0", color: "rgba(255,255,255,0.7)", fontSize: 11 }}>Choose the date range for your service directory export report.</p>
+            </div>
+            <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+              <div>
+                <label style={LBL}>From Date (Optional)</label>
+                <Inp 
+                  type="date" 
+                  value={startDate} 
+                  onChange={e => setStartDate(e.target.value)} 
+                />
+              </div>
+              <div>
+                <label style={LBL}>To Date (Optional)</label>
+                <Inp 
+                  type="date" 
+                  value={endDate} 
+                  onChange={e => setEndDate(e.target.value)} 
+                />
+                <p style={{ margin: "4px 0 0 0", color: C.muted, fontSize: 10 }}>Leave both fields empty to export the entire history.</p>
+              </div>
+
+              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                <Btn 
+                  onClick={() => { setExportModalOpen(false); setStartDate(""); setEndDate(""); }} 
+                  variant="ghost" 
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </Btn>
+                <Btn 
+                  onClick={handleExportPDF} 
+                  variant="success" 
+                  style={{ flex: 1 }}
+                >
+                  Generate PDF report 📄
+                </Btn>
+              </div>
+            </div>
           </div>
-        ))}
+        </div>
+      )}
+        {view === "manager_dashboard" && (
+          <>
+            <PageHeader 
+              title="📊 OTC Control Panel" 
+              sub="Real-time multi-dimensional overview of Over-The-Counter branch repairs" 
+              action={
+                <Btn variant="pdf" onClick={() => setExportModalOpen(true)} style={{ gap: 6, display: "flex", alignItems: "center" }}>
+                  <span>📄 Download PDF Report</span>
+                </Btn>
+              }
+              onMenu={onMenu || (() => setMobileMenuOpen(true))}
+            />
+            <div className="page-pad" style={{ padding: 24 }}>
+              {tableMissing && <SupabaseSetupHelper />}
+              
+              {/* KPI Metrics Summary Panel */}
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)", gap: 16, marginBottom: 20 }}>
+                <Card style={{ padding: 18 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: C.muted, textTransform: "uppercase" }}>Total OTC Cases</span>
+                    <span style={{ fontSize: 20 }}>🎟️</span>
+                  </div>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: C.text, marginTop: 8 }}>{stats.total}</div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Cumulative submissions</div>
+                </Card>
+                <Card style={{ padding: 18 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: C.muted, textTransform: "uppercase" }}>Pending Repairs</span>
+                    <span style={{ fontSize: 20 }}>⏳</span>
+                  </div>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: "#EA580C", marginTop: 8 }}>{stats.pending}</div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Awaiting technician updates</div>
+                </Card>
+                <Card style={{ padding: 18 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: C.muted, textTransform: "uppercase" }}>Fixed Decoders</span>
+                    <span style={{ fontSize: 20 }}>✅</span>
+                  </div>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: C.success, marginTop: 8 }}>{stats.done}</div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Successfully matched & closed</div>
+                </Card>
+                <Card style={{ padding: 18 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: C.muted, textTransform: "uppercase" }}>Conversion Rate</span>
+                    <span style={{ fontSize: 20 }}>📈</span>
+                  </div>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: C.blue, marginTop: 8 }}>{stats.rate}%</div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>OTC matching closure index</div>
+                </Card>
+              </div>
+
+              {/* Filter Controls */}
+              <Card style={{ marginBottom: 20, padding: 16 }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 250 }}>
+                    <label style={LBL}>Search records list (e.g. name, card, phone #, technician)</label>
+                    <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Type name, card identifier, or phone prefix..." />
+                  </div>
+                  {search && (
+                    <div style={{ marginTop: 20 }}>
+                      <Btn onClick={() => setSearch("")} variant="ghost" size="sm">Clear Filters</Btn>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              {/* Grouped List View */}
+              <div>
+                {loading && logs.length === 0 ? (
+                  <div style={{ padding: 60, textAlign: "center", color: C.muted }}>Loading Grouped Worklogs...</div>
+                ) : Object.keys(groupedJobs).length === 0 ? (
+                  <Card>
+                    <EmptyState icon="🔍" msg={`No matches found for search "${search}"`} />
+                  </Card>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                    {Object.entries(groupedJobs).map(([date, technicians]) => {
+                      const ticketCount = Object.values(technicians).reduce((sum, list) => sum + list.length, 0);
+                      
+                      return (
+                        <div key={date}>
+                          <div style={{ display: "flex", alignItems: "center", justifySelf: "flex-start", gap: 10, padding: "2px 8px 10px 4px", borderBottom: `2.5px solid ${C.blue}`, marginBottom: 16 }}>
+                            <span style={{ fontSize: 16, fontWeight: 900, color: C.text, fontFamily: "'Barlow Condensed', sans-serif", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                              🗓️ {fmtDate(date)}
+                            </span>
+                            <Badge color="blue">{ticketCount} Tickets Registered</Badge>
+                          </div>
+
+                          <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingLeft: isMobile ? 0 : 16 }}>
+                            {Object.entries(technicians).map(([tech, list]) => {
+                              const isPendingGroup = tech.includes("⏳");
+                              return (
+                                <div key={tech} style={{ border: `1px solid ${C.border}`, borderRadius: 12, background: "#FFF", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.02)" }}>
+                                  
+                                  <div style={{ background: isPendingGroup ? "#FFFBEB" : "#F8FAFC", padding: "12px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <span style={{ fontSize: 13, fontWeight: 800, color: isPendingGroup ? "#C2410C" : C.blue }}>
+                                      {isPendingGroup ? "⏳ Pending Technician Closure" : `🔧 Finished by: ${tech}`}
+                                    </span>
+                                    <Badge color={isPendingGroup ? "orange" : "green"}>{list.length} Items</Badge>
+                                  </div>
+
+                                  <div style={{ divideY: "1px solid #E2E8F0" }}>
+                                    {list.map((jobRow: any) => (
+                                      <div key={jobRow.id} style={{ padding: 16, borderBottom: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "3.5fr 4.5fr 2fr", gap: 16, alignItems: "center" }}>
+                                        
+                                        <div>
+                                          <div style={{ fontWeight: 800, color: C.text, fontSize: 14 }}>{jobRow.name}</div>
+                                          <div style={{ fontFamily: "monospace", fontSize: 11, color: C.muted, marginTop: 4 }}>
+                                            ☎ {jobRow.phone_number}
+                                          </div>
+                                          <div style={{ fontFamily: "monospace", fontSize: 11, color: C.blueMid, fontWeight: 700, marginTop: 2 }}>
+                                            💳 CARD: {jobRow.card_number}
+                                          </div>
+                                        </div>
+
+                                        <div>
+                                          <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>Reported problem Fault</div>
+                                          <p style={{ margin: 0, fontSize: 13, color: "#334155", lineHeight: 1.4, fontStyle: "italic" }}>
+                                            "{jobRow.problem}"
+                                          </p>
+                                        </div>
+
+                                        <div style={{ textAlign: isMobile ? "left" : "right", display: "flex", flexDirection: "column", gap: 6, alignItems: isMobile ? "flex-start" : "flex-end" }}>
+                                          <Badge color={jobRow.status === "pending" ? "orange" : "green"}>
+                                            {jobRow.status === "pending" ? "Awaiting Repair" : "Repaired"}
+                                          </Badge>
+                                          
+                                          {jobRow.status === "done" && (
+                                            <div style={{ fontSize: 11, color: C.success, fontWeight: 600 }}>
+                                              ✓ Repaired {jobRow.repaired_at ? fmtDate(jobRow.repaired_at.split("T")[0]) : ""}
+                                            </div>
+                                          )}
+                                          
+                                          <div style={{ fontSize: 10, color: C.muted }}>
+                                            Agent Branch: {jobRow.branch || "Central Desk"}
+                                          </div>
+                                        </div>
+
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {view === "otc_analytics" && (
+          <>
+            <PageHeader 
+              title="📈 OTC Performance Analytics" 
+              sub="Deeper insights into Over-The-Counter physical repair velocity and common defects" 
+              onMenu={onMenu || (() => setMobileMenuOpen(true))}
+            />
+            <div className="page-pad" style={{ padding: 24, maxWidth: 1000, margin: "0 auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
+                {/* Defect Problem Types Distribution */}
+                <Card style={{ padding: 20 }}>
+                  <h3 style={{ margin: "0 0 16px 0", fontSize: 15, fontWeight: 800, color: C.text }}>Common Fault Frequencies breakdown</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    {problemFrequencies.map((p, idx) => {
+                      const share = stats.total > 0 ? Math.round((p.count / stats.total) * 100) : 0;
+                      return (
+                        <div key={p.name}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                            <span>{p.name}</span>
+                            <span>{p.count} cases ({share}%)</span>
+                          </div>
+                          <div style={{ width: "100%", height: 8, background: "#E2E8F0", borderRadius: 4, overflow: "hidden" }}>
+                            <div style={{ width: `${share}%`, height: "100%", background: PIE_COLORS[idx % PIE_COLORS.length], borderRadius: 4 }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {problemFrequencies.length === 0 && (
+                      <EmptyState icon="🌱" msg="No logs recorded yet" />
+                    )}
+                  </div>
+                </Card>
+
+                {/* Conversion Ratio Tracker */}
+                <Card style={{ padding: 20, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center" }}>
+                  <h3 style={{ margin: "0 0 20px 0", fontSize: 15, fontWeight: 800, color: C.text }}>Decoder Match Resolution Rate</h3>
+                  
+                  <div style={{ position: "relative", width: 140, height: 140, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                    <svg width="140" height="140" viewBox="0 0 36 36" style={{ transform: "rotate(-90deg)" }}>
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#E2E8F0" strokeWidth="2.5" />
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={C.success} strokeDasharray={`${stats.rate}, 100`} strokeWidth="3" strokeLinecap="round" />
+                    </svg>
+                    <div style={{ position: "absolute", fontSize: 26, fontWeight: 900, color: C.text }}>{stats.rate}%</div>
+                  </div>
+
+                  <p style={{ margin: 0, fontSize: 13, color: C.muted, maxWidth: 300, lineHeight: 1.4 }}>
+                    This metric represents the ratio of over-the-counter complaints successfully resolved and checked out by technicians.
+                  </p>
+                </Card>
+              </div>
+
+              {/* Resolution rate by region */}
+              <Card style={{ padding: 20 }}>
+                <h3 style={{ margin: "0 0 16px 0", fontSize: 15, fontWeight: 800, color: C.text }}>OTC Registrations by Administrative Regions</h3>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 16 }}>
+                  {regions.map(r => {
+                    const rLogs = logs.filter(l => l.region === r.name || (r.name === "Tanzania" && !l.region));
+                    const rDone = rLogs.filter(l => l.status === "done").length;
+                    const rRate = rLogs.length > 0 ? Math.round((rDone / rLogs.length) * 100) : 0;
+                    return (
+                      <div key={r.id} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
+                        <div style={{ fontWeight: 800, fontSize: 14, color: C.text, marginBottom: 4 }}>📍 {r.name}</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted, marginBottom: 8 }}>
+                          <span>Volume: {rLogs.length} cases</span>
+                          <span>Sync: {rRate}%</span>
+                        </div>
+                        <div style={{ width: "100%", height: 6, background: "#E2E8F0", borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{ width: `${rRate}%`, height: "100%", background: C.blue }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            </div>
+          </>
+        )}
+
+        {view === "manage_tickets" && (
+          <>
+            <PageHeader 
+              title="⚙️ Ticket Management Center" 
+              sub="Supervisory console overrides, manual technician allocation, and dataset sync audits" 
+              onMenu={onMenu || (() => setMobileMenuOpen(true))}
+            />
+            <div className="page-pad" style={{ padding: 24, maxWidth: 960, margin: "0 auto" }}>
+              {selectedTicket && (
+                <Card style={{ marginBottom: 24, background: "#F1F5F9", border: "1px solid #CBD5E1", boxShadow: "0 4px 12px rgba(0,0,0,0.05)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.text }}>🔧 Supervisor Manual Override Action</h3>
+                    <Btn onClick={() => { setSelectedTicket(null); setAssignTechId(""); setCustomTechName(""); }} variant="ghost" size="sm">Cancel</Btn>
+                  </div>
+                  <p style={{ margin: "0 0 12px 0", fontSize: 12, color: C.muted }}>
+                    Overriding ticket ID: <strong>{selectedTicket.id}</strong> for customer <strong>{selectedTicket.name}</strong>. Physical decoder/smartcard mismatch override.
+                  </p>
+
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14, marginBottom: 16 }}>
+                    <div>
+                      <label style={LBL}>Assign Registered Repair Technician</label>
+                      <select 
+                        value={assignTechId} 
+                        onChange={e => { setAssignTechId(e.target.value); if(e.target.value) setCustomTechName(""); }}
+                        style={{ width: "100%", padding: 10, borderRadius: 8, border: `1.5px solid ${C.border}`, background: "#FFF", fontSize: 13, outline: "none" }}
+                      >
+                        <option value="">-- Choose registered technician --</option>
+                        {technicians.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} ({t.region || "HQ"})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={LBL}>Or Input External Specialist / Partner</label>
+                      <Inp value={customTechName} onChange={e => { setCustomTechName(e.target.value); if(e.target.value) setAssignTechId(""); }} placeholder="e.g. Azam Technical Lab, Zanzibar Support" />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <Btn onClick={() => handleSupervisorResolve(selectedTicket.id)} disabled={actionLoading} variant="success">
+                      {actionLoading ? "Processing Override..." : "Force Resolve Status ✓"}
+                    </Btn>
+                    <Btn onClick={() => handleSupervisorDelete(selectedTicket.id)} disabled={actionLoading} style={{ background: "#CC1B1B", color: "#FFF" }}>
+                      Permanent Delete Ticket 🗑️
+                    </Btn>
+                  </div>
+                </Card>
+              )}
+
+              <Card style={{ padding: 0 }}>
+                <div style={{ padding: 16, borderBottom: `1px solid ${C.border}`, background: "#F8FAFC", display: "flex", justifySelf: "flex-start", alignItems: "center", width: "100%" }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: C.text }}>General Submissions Register</div>
+                </div>
+
+                <div style={{ divideY: "1px solid #E2E8F0" }}>
+                  {logs.map((tc: any) => (
+                    <div key={tc.id} style={{ padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${C.border}`, flexWrap: "wrap", gap: 10 }}>
+                      <div>
+                        <div style={{ fontWeight: 800, color: C.text, fontSize: 14 }}>{tc.name}</div>
+                        <div style={{ fontFamily: "monospace", fontSize: 11, color: C.muted, marginTop: 2 }}>{tc.card_number} | {tc.phone_number}</div>
+                      </div>
+                      
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <Badge color={tc.status === "pending" ? "orange" : "green"}>
+                          {tc.status === "pending" ? "⏳ Awaiting Repair" : "✓ Finished"}
+                        </Badge>
+                        <Btn onClick={() => setSelectedTicket(tc)} variant="ghost" size="sm">Manage & Override ⚙️</Btn>
+                      </div>
+                    </div>
+                  ))}
+                  {logs.length === 0 && (
+                    <div style={{ padding: 40 }}><EmptyState icon="📬" msg="Register logs empty value" /></div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          </>
+        )}
+
+        {view === "otc_staff_dir" && (
+          <>
+            <PageHeader 
+              title="📂 Technician Roster" 
+              sub={managerTag ? `Dispatch filter active: "${managerTag}"` : "View and verify active field technicians and customer service desks"}
+              onMenu={onMenu || (() => setMobileMenuOpen(true))}
+            />
+            <div className="page-pad" style={{ padding: 24, maxWidth: 840, margin: "0 auto" }}>
+              {managerTag && (
+                <div style={{ background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: 10, padding: 14, marginBottom: 20 }}>
+                  <h4 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: C.text }}>🎯 Saved Profile Filter Rule</h4>
+                  <p style={{ margin: "4px 0 0 0", fontSize: 12, color: C.muted }}>
+                    Only viewing technicians from <strong>HQ (Headquarters)</strong> with a matching dispatch tag: <strong style={{ color: C.blueMid }}>"{managerTag}"</strong>.
+                  </p>
+                </div>
+              )}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                {/* 1. Dispatch Team (Filtered list according to prompt "Otc manager can only view technicians from HQ with tag 'TAZARA'") */}
+                <div>
+                  <h3 style={{ fontSize: 13, fontWeight: 800, color: C.blueMid, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>
+                    📡 My Dispatch Coverage ({technicians.length} Technicians)
+                  </h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {technicians.map(u => (
+                      <Card key={u.id} style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", borderLeft: `4px solid ${C.success}` }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ 
+                            width: 44, height: 44, borderRadius: "50%", 
+                            background: C.blue, 
+                            color: "#FFF", fontSize: 14, fontWeight: 800, 
+                            display: "flex", alignItems: "center", justifyContent: "center" 
+                          }}>
+                            {u.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 850, color: C.text, fontSize: 14 }}>{u.name}</div>
+                            <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>@{u.username} · Station: {u.branch || "HQ"}</div>
+                          </div>
+                        </div>
+                        
+                        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                          <div style={{ textAlign: "right" }}>
+                            <span style={{ 
+                              fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 20, 
+                              background: "#D1FAE5",
+                              color: "#065F46",
+                              textTransform: "uppercase"
+                            }}>
+                              HQ Dispatch Active
+                            </span>
+                            <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>📍 Region: {u.region || "TZ"}</div>
+                          </div>
+
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 140 }}>
+                            <label style={{ fontSize: 9, fontWeight: 700, color: C.muted }}>SYSTEM TAG</label>
+                            <input 
+                              type="text" 
+                              value={u.tag || ""} 
+                              onChange={e => {
+                                const val = e.target.value;
+                                const updated = users.map(usr => usr.id === u.id ? { ...usr, tag: val } : usr);
+                                onSaveUsers?.(updated);
+                              }}
+                              placeholder="No Tag (e.g. TAZARA)"
+                              style={{ padding: "4px 8px", fontSize: 11, borderRadius: 6, border: `1px solid ${C.border}`, background: "#FFF", outline: "none" }}
+                            />
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                    {technicians.length === 0 && (
+                      <div style={{ padding: 24, textAlign: "center", color: C.muted, border: `1px dashed ${C.border}`, borderRadius: 10, background: "#FFF" }}>
+                        💡 No active HQ technicians currently match your profile tag "{managerTag || "(none)"}". Use the general register below to add tags.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Directory Management Block (To enable manual assignment of TAZARA tag) */}
+                <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 20 }}>
+                  <h3 style={{ fontSize: 13, fontWeight: 800, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>
+                    🛠️ General Staff Registry & Tag Manager
+                  </h3>
+                  <p style={{ fontSize: 12, color: C.muted, margin: "0 0 16px 0", lineHeight: 1.4 }}>
+                    To add a technician from HQ to your direct dispatch list, type <strong style={{ color: C.blue }}>TAZARA</strong> (or your custom tag) in their Tag input field below.
+                  </p>
+                  
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {users.filter(u => u.role === "technician" || u.role === "otc_user" || u.role === "otc_manager").map(u => {
+                      const isMatched = technicians.some(t => t.id === u.id);
+                      if (isMatched && u.role === "technician") return null; // skip duplicate representation
+
+                      return (
+                        <Card key={u.id} style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", opacity: u.role === "technician" ? 1 : 0.7 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ 
+                              width: 44, height: 44, borderRadius: "50%", 
+                              background: u.role === "otc_manager" ? "#8B5CF6" : u.role === "otc_user" ? "#EA580C" : C.blueMid, 
+                              color: "#FFF", fontSize: 14, fontWeight: 800, 
+                              display: "flex", alignItems: "center", justifyContent: "center" 
+                            }}>
+                              {u.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 850, color: C.text, fontSize: 14 }}>{u.name}</div>
+                              <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>@{u.username} · Station: {u.branch || "HQ"}</div>
+                            </div>
+                          </div>
+                          
+                          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                            <div style={{ textAlign: "right" }}>
+                              <span style={{ 
+                                fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 20, 
+                                background: u.role === "otc_manager" ? "#EDE9FE" : u.role === "otc_user" ? "#FFEDD5" : "#DBEAFE",
+                                color: u.role === "otc_manager" ? "#6D28D9" : u.role === "otc_user" ? "#C2410C" : C.blueMid,
+                                textTransform: "uppercase"
+                              }}>
+                                {u.role === "otc_manager" ? "Supervisor" : u.role === "otc_user" ? "OTC Desk Agent" : "Technician"}
+                              </span>
+                              <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>📍 Region: {u.region || "TZ"}</div>
+                            </div>
+
+                            {u.role === "technician" && (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 140 }}>
+                                <label style={{ fontSize: 9, fontWeight: 700, color: C.muted }}>SYSTEM TAG</label>
+                                <input 
+                                  type="text" 
+                                  value={u.tag || ""} 
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    const updated = users.map(usr => usr.id === u.id ? { ...usr, tag: val } : usr);
+                                    onSaveUsers?.(updated);
+                                  }}
+                                  placeholder="No Tag (e.g. TAZARA)"
+                                  style={{ padding: "4px 8px", fontSize: 11, borderRadius: 6, border: `1px solid ${C.border}`, background: "#FFF", outline: "none" }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {view === "user_profile" && (
+          <>
+            <PageHeader 
+              title="👤 Supervisor Profile" 
+              sub="Management and station allocation data parameters" 
+              onMenu={onMenu || (() => setMobileMenuOpen(true))}
+            />
+            <div className="page-pad" style={{ padding: 24, maxWidth: 600, margin: "0 auto" }}>
+              <Card style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ background: `linear-gradient(135deg, ${C.blueDark}, ${C.blue})`, padding: "24px", textAlign: "center", color: "#fff" }}>
+                  <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#8B5CF6", color: "#FFF", fontSize: 26, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px auto" }}>
+                    {user.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{user.name}</h3>
+                  <div style={{ marginTop: 6 }}><span style={{ background: "#8B5CF6", color: "#FFF", fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 20, textTransform: "uppercase" }}>Over-The-Counter Operations Supervisor</span></div>
+                </div>
+                <div style={{ padding: 20 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>SYSTEM USERNAME</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{user.username}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>SUPERVISORY REGION</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>📍 {user.region || "HQ Desk"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>STATION / OFFICE</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>🏢 {user.branch || "Headquarters Operations"}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>ACCOUNT REGISTERED</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{fmtDate(user.createdAt)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, paddingBottom: 10, alignItems: "center" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>PROFILE DISPATCH TAG</span>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input 
+                          type="text"
+                          value={profileTag}
+                          onChange={e => setProfileTag(e.target.value)}
+                          placeholder="e.g. TAZARA"
+                          style={{
+                            padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.border}`,
+                            fontSize: 12, fontWeight: 700, background: "#FFF", width: 120, outline: "none"
+                          }}
+                        />
+                        <Btn onClick={handleSaveProfileTag} variant="success" size="sm" style={{ padding: "6px 12px", fontSize: 11 }}>Save Tag</Btn>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.muted }}>TOTAL BRANCH CASES</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{logs.length} OTC Tickets logged</span>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 24, borderTop: `1px solid ${C.border}`, paddingTop: 16, textAlign: "center" }}>
+                    <Btn onClick={onLogout} variant="ghost" style={{ width: "100%", color: "#CC1B1B", borderColor: "#FCA5A5" }}>↩ Log out of Supervisor Account</Btn>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </>
+        )}
+    </>
+  );
+
+  if (user.role === "admin") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg }}>
+        {/* Horizontal Navigation Sub-tabs Bar for Admin inside OTC panel */}
+        <div style={{ 
+          background: "#FFF", 
+          borderBottom: `1px solid ${C.border}`, 
+          padding: "10px 24px", 
+          display: "flex", 
+          gap: 12, 
+          overflowX: "auto",
+          whiteSpace: "nowrap",
+          alignItems: "center"
+        }}>
+          <div style={{ fontWeight: 800, fontSize: 13, textTransform: "uppercase", letterSpacing: 0.5, color: C.muted, marginRight: 12, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>🛠️</span> OTC SUPERVISOR:
+          </div>
+          {nav.map(n => (
+            <button
+              key={n.key}
+              onClick={() => setView(n.key)}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 20,
+                fontSize: 12,
+                fontWeight: 750,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: view === n.key ? "#EFF6FF" : "transparent",
+                color: view === n.key ? C.blue : C.muted,
+                border: view === n.key ? `1.5px solid ${C.blue}` : "1.5px solid transparent",
+                transition: "all 0.2s"
+              }}
+            >
+              <span>{n.icon}</span>
+              <span>{n.label}</span>
+              {n.badge !== undefined && n.badge > 0 && (
+                <span style={{ background: C.red, color: "#fff", fontSize: 10, padding: "2px 6px", borderRadius: 10, fontWeight: 800 }}>
+                  {n.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {content}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-layout" style={{ fontFamily: "'DM Sans', sans-serif", background: C.bg }}>
+      <Sidebar user={user} nav={nav} active={view} setActive={setView} onLogout={onLogout} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
+      
+      <div className="app-main" style={{ overflowY: "auto" }}>
+        {content}
       </div>
     </div>
   );
 }
+
+// Protected wrapped components for the switchers
+const OtcUserForm = withRoleProtection(OtcUserFormComponent, ["otc_user"]);
+const OtcManagerDashboard = withRoleProtection(OtcManagerDashboardComponent, ["otc_manager"]);

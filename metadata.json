@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Azam TV Service Desk",
+  "description": "Azam TV technician service portal, job batch logging, and Over-The-Counter (OTC) customer service desk with live technician match coordination and dashboard logging.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
