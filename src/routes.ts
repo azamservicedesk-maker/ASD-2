@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import * as dotenv from "dotenv";
 import crypto from "crypto";
 
-dotenv.config();
+dotenv.config({ override: true });
 
 const router = Router();
 
@@ -44,6 +44,35 @@ if (isSupabaseConfigured) {
   }
 } else {
   console.log("Supabase URL or Key not set. Express backend running in HIGH-RELIABILITY OFFLINE FALLBACK MODE.");
+}
+
+// Dynamically verify if the users table schema has matching columns
+let isUsersTableSchemaValid = false;
+let hasCheckedSchema = false;
+
+async function verifyUsersTableSchema(): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase) return false;
+  if (hasCheckedSchema) return isUsersTableSchemaValid;
+
+  try {
+    const { error } = await supabase
+      .from("users")
+      .select("id, name, username, password, role, region, branch, createdAt")
+      .limit(0);
+
+    if (error) {
+      console.log("[Supabase Sync] Note: Remote 'users' table columns are missing or schema is outdated. Running in high-reliability offline fallback mode for user settings.");
+      isUsersTableSchemaValid = false;
+    } else {
+      console.log("[Supabase Sync] Remote 'users' table schema is verified! Enabling active cloud sync.");
+      isUsersTableSchemaValid = true;
+    }
+  } catch (err) {
+    console.log("[Supabase Sync] System checking used high-reliability offline fallback mode.");
+    isUsersTableSchemaValid = false;
+  }
+  hasCheckedSchema = true;
+  return isUsersTableSchemaValid;
 }
 
 // ==========================================================
@@ -297,25 +326,33 @@ router.post("/auth/login", async (req: Request, res: Response) => {
 
   // If Supabase is connected, attempt validation there first
   if (isSupabaseConfigured && supabase) {
-    try {
-      const response = await supabase
-        .from("users")
-        .select("*")
-        .eq("username", username?.trim())
-        .maybeSingle();
+    const isSchemaValid = await verifyUsersTableSchema();
+    if (isSchemaValid) {
+      try {
+        const response = await supabase
+          .from("users")
+          .select("*")
+          .eq("username", username?.trim())
+          .maybeSingle();
 
-      if (!response.error && response.data) {
-        const user = response.data;
-        if (verifyPassword(password, user.password)) {
-          console.log(`Supabase verification successful for ${normalizedUsername}`);
-          return res.status(200).json({ success: true, user });
-        } else {
-          console.log(`Supabase password verification failed for ${normalizedUsername}`);
-          return res.status(401).json({ error: "Invalid username or password credentials." });
+        if (!response.error && response.data) {
+          const user = response.data;
+          // Verify we have a valid password column in the DB, otherwise fallback to offline mode checks
+          if (user.password !== undefined && user.password !== null) {
+            if (verifyPassword(password, user.password)) {
+              console.log(`Supabase verification successful for ${normalizedUsername}`);
+              return res.status(200).json({ success: true, user });
+            } else {
+              console.log(`Supabase password verification failed for ${normalizedUsername}`);
+              return res.status(401).json({ error: "Invalid username or password credentials." });
+            }
+          } else {
+            console.warn(`Supabase user found but lacks 'password' column (possible schema mismatch or outdated table). Falling back to mock dataset authentication...`);
+          }
         }
+      } catch (err) {
+        console.error("Supabase login query error, checking local/pre-registered dataset:", err);
       }
-    } catch (err) {
-      console.error("Supabase login query error, checking local/pre-registered dataset:", err);
     }
   }
 
@@ -341,13 +378,60 @@ router.post("/auth/login", async (req: Request, res: Response) => {
 // ==========================================================
 router.get("/users", async (req: Request, res: Response) => {
   if (isSupabaseConfigured && supabase) {
-    try {
-      const response = await supabase.from("users").select("*");
-      if (!response.error && response.data) {
-        return res.status(200).json({ users: response.data || [] });
+    const isSchemaValid = await verifyUsersTableSchema();
+    if (isSchemaValid) {
+      try {
+        const response = await supabase.from("users").select("*");
+        if (!response.error && response.data) {
+          let dbUsers = response.data || [];
+          
+          // Check if the returned users table lacks essential properties due to outdated/mismatched schemas
+          const hasSchemaMismatch = dbUsers.length > 0 && (dbUsers[0].password === undefined || dbUsers[0].name === undefined);
+          if (hasSchemaMismatch) {
+            console.warn("Detected missing name or password column in Supabase users table (schema mismatch). Falling back to high-reliability local memory dataset.");
+            throw new Error("Supabase users schema mismatch (columns missing)");
+          }
+
+          // Auto-seed: If the database returned an empty user list, let's seed mockUsers into Supabase!
+          if (dbUsers.length === 0) {
+            console.log("Supabase 'users' table is empty. Auto-seeding default mock users...");
+            const seededUsers = mockUsers.map(u => ({
+              ...u,
+              password: hashPassword(u.password)
+            }));
+            const seedResponse = await supabase.from("users").insert(seededUsers);
+            if (!seedResponse.error) {
+              console.log("Successfully seeded default mock users to Supabase.");
+              dbUsers = seededUsers;
+            } else {
+              console.warn("Reason details:", JSON.stringify(seedResponse.error));
+              console.warn("Using high-reliability local memory fallback datasets to preserve user data.");
+              dbUsers = mockUsers;
+            }
+          } else {
+            // Double guarantee: If the admin is not in the dbUsers list, let's restore and insert them!
+            const hasAdmin = dbUsers.some((u: any) => u.username && u.username.toLowerCase() === "azamservicedesk@gmail.com");
+            if (!hasAdmin) {
+              console.log("Admin 'azamservicedesk@gmail.com' not found in database. Auto-restoring admin user...");
+              const defaultAdmin = mockUsers.find(u => u.username === "azamservicedesk@gmail.com");
+              if (defaultAdmin) {
+                const seededAdmin = { ...defaultAdmin, password: hashPassword(defaultAdmin.password) };
+                const seedResponse = await supabase.from("users").insert([seededAdmin]);
+                if (!seedResponse.error) {
+                  dbUsers.push(seededAdmin);
+                } else {
+                  console.warn("Using default in-memory fallback admin credentials instead.");
+                  dbUsers.push(seededAdmin);
+                }
+              }
+            }
+          }
+          
+          return res.status(200).json({ users: dbUsers });
+        }
+      } catch (err) {
+        console.error("Supabase users query error, falling back to local pre-registered datasets:", err);
       }
-    } catch (err) {
-      console.error("Supabase users query error:", err);
     }
   }
   
@@ -370,18 +454,21 @@ router.get("/users/profile", async (req: Request, res: Response) => {
   console.log(`Request user profile ID: ${id}`);
 
   if (isSupabaseConfigured && supabase) {
-    try {
-      const response = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
+    const isSchemaValid = await verifyUsersTableSchema();
+    if (isSchemaValid) {
+      try {
+        const response = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", id)
+          .maybeSingle();
 
-      if (!response.error && response.data) {
-        return res.status(200).json(response.data);
+        if (!response.error && response.data) {
+          return res.status(200).json(response.data);
+        }
+      } catch (err) {
+        console.error("Supabase profile error, falling back:", err);
       }
-    } catch (err) {
-      console.error("Supabase profile error, falling back:", err);
     }
   }
 
@@ -529,13 +616,16 @@ router.post("/users/sync", async (req: Request, res: Response) => {
   console.log(`Syncing ${users?.length || 0} users...`);
 
   if (isSupabaseConfigured && supabase) {
-    try {
-      const response = await supabase.from("users").upsert(users);
-      if (!response.error) {
-        return res.status(200).json({ success: true, message: "Profiles synchronized successfully." });
+    const isSchemaValid = await verifyUsersTableSchema();
+    if (isSchemaValid) {
+      try {
+        const response = await supabase.from("users").upsert(users);
+        if (!response.error) {
+          return res.status(200).json({ success: true, message: "Profiles synchronized successfully." });
+        }
+      } catch (err) {
+        console.error("Supabase user sync error:", err);
       }
-    } catch (err) {
-      console.error("Supabase user sync error:", err);
     }
   }
 

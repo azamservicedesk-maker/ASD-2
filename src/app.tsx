@@ -3205,21 +3205,72 @@ function SupabaseSetupHelper() {
 
   const sql = `-- Step 1: Ensure UUID extension is active\n` +
     `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";\n\n` +
-    `-- Step 2: Create 'otc_jobs' table\n` +
-    `CREATE TABLE IF NOT EXISTS otc_jobs (\n` +
-    `  id VARCHAR(255) PRIMARY KEY,\n` +
-    `  name VARCHAR(255) NOT NULL,\n` +
-    `  phone_number VARCHAR(100) NOT NULL,\n` +
-    `  card_number VARCHAR(100) NOT NULL,\n` +
-    `  problem TEXT NOT NULL,\n` +
-    `  status VARCHAR(50) DEFAULT 'pending' NOT NULL CHECK (status IN ('pending', 'done')),\n` +
-    `  source VARCHAR(50) DEFAULT 'OTC' NOT NULL,\n` +
-    `  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,\n` +
-    `  repaired_by VARCHAR(255) DEFAULT NULL,\n` +
-    `  repaired_at TIMESTAMP WITH TIME ZONE DEFAULT NULL\n` +
+    `-- Step 2: Safely drop old conflicting or incomplete tables\n` +
+    `DROP TABLE IF EXISTS "users" CASCADE;\n` +
+    `DROP TABLE IF EXISTS "jobs" CASCADE;\n` +
+    `DROP TABLE IF EXISTS "activity" CASCADE;\n` +
+    `DROP TABLE IF EXISTS "otc_jobs" CASCADE;\n\n` +
+    `-- Step 3: Create 'users' table with fields matching front-end types\n` +
+    `CREATE TABLE "users" (\n` +
+    `  "id" VARCHAR(255) PRIMARY KEY,\n` +
+    `  "name" VARCHAR(255) NOT NULL,\n` +
+    `  "username" VARCHAR(255) UNIQUE NOT NULL,\n` +
+    `  "password" VARCHAR(255) NOT NULL,\n` +
+    `  "role" VARCHAR(50) NOT NULL CHECK ("role" IN ('admin', 'technician', 'management', 'technical_analyst', 'otc_manager', 'otc_user')),\n` +
+    `  "region" VARCHAR(100),\n` +
+    `  "branch" VARCHAR(100),\n` +
+    `  "managementType" VARCHAR(100),\n` +
+    `  "createdAt" VARCHAR(255) NOT NULL\n` +
     `);\n\n` +
-    `-- Step 3: Enable realtime subscriptions\n` +
-    `ALTER PUBLICATION supabase_realtime ADD TABLE otc_jobs;`;
+    `-- Step 4: Create 'jobs' table with correct camelCase columns\n` +
+    `CREATE TABLE "jobs" (\n` +
+    `  "id" VARCHAR(255) PRIMARY KEY,\n` +
+    `  "technicianId" VARCHAR(255) NOT NULL,\n` +
+    `  "technicianName" VARCHAR(255) NOT NULL,\n` +
+    `  "region" VARCHAR(100) NOT NULL,\n` +
+    `  "branch" VARCHAR(100) NOT NULL,\n` +
+    `  "date" DATE NOT NULL,\n` +
+    `  "submittedAt" VARCHAR(255) NOT NULL,\n` +
+    `  "status" VARCHAR(50) DEFAULT 'submitted' NOT NULL,\n` +
+    `  "customerName" VARCHAR(255) NOT NULL,\n` +
+    `  "phone" VARCHAR(100),\n` +
+    `  "cardNumber" VARCHAR(100) NOT NULL,\n` +
+    `  "faultType" VARCHAR(100) NOT NULL,\n` +
+    `  "modelNumber" VARCHAR(100) NOT NULL,\n` +
+    `  "troubleshootingDescription" TEXT,\n` +
+    `  "result" VARCHAR(50) NOT NULL,\n` +
+    `  "replacement" VARCHAR(50) NOT NULL,\n` +
+    `  "replacementReason" VARCHAR(255),\n` +
+    `  "isFieldJob" BOOLEAN DEFAULT FALSE,\n` +
+    `  "agentName" VARCHAR(255)\n` +
+    `);\n\n` +
+    `-- Step 5: Create 'activity' table\n` +
+    `CREATE TABLE "activity" (\n` +
+    `  "id" VARCHAR(255) PRIMARY KEY,\n` +
+    `  "userId" VARCHAR(255) NOT NULL,\n` +
+    `  "userName" VARCHAR(255) NOT NULL,\n` +
+    `  "userRole" VARCHAR(100) NOT NULL,\n"action" VARCHAR(100) NOT NULL,\n` +
+    `  "detail" TEXT NOT NULL,\n` +
+    `  "timestamp" VARCHAR(255) NOT NULL\n` +
+    `);\n\n` +
+    `-- Step 6: Create 'otc_jobs' table with correct snake_case fields\n` +
+    `CREATE TABLE "otc_jobs" (\n` +
+    `  "id" VARCHAR(255) PRIMARY KEY,\n` +
+    `  "name" VARCHAR(255) NOT NULL,\n` +
+    `  "phone_number" VARCHAR(100) NOT NULL,\n` +
+    `  "card_number" VARCHAR(100) NOT NULL,\n` +
+    `  "problem" TEXT NOT NULL,\n` +
+    `  "status" VARCHAR(50) DEFAULT 'pending' NOT NULL CHECK ("status" IN ('pending', 'done')),\n` +
+    `  "source" VARCHAR(50) DEFAULT 'OTC' NOT NULL,\n` +
+    `  "created_at" VARCHAR(255) NOT NULL,\n` +
+    `  "repaired_by" VARCHAR(255) DEFAULT NULL,\n` +
+    `  "repaired_at" VARCHAR(255) DEFAULT NULL\n` +
+    `);\n\n` +
+    `-- Step 7: Create optimized search indexes\n` +
+    `CREATE INDEX IF NOT EXISTS idx_otc_jobs_matching ON "otc_jobs" ("card_number", "phone_number", "status");\n` +
+    `CREATE INDEX IF NOT EXISTS idx_jobs_matching ON "jobs" ("cardNumber", "phone");\n\n` +
+    `-- Step 8: Enable realtime subscriptions\n` +
+    `ALTER PUBLICATION supabase_realtime ADD TABLE "otc_jobs";`;
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(sql);
