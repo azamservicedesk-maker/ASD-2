@@ -8,7 +8,7 @@ import {
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 
-const FAULT_TYPES = ["No SIGNAL","No POWER","SHORT CIRCUIT","STB REBOOTING","Smart Card Incorrect","No HDMI Output","No AV Output","No SOUND","INSERT CARD","Software Failed","Display Issue","No Program","No Channels","No Video output","Standby Mode","Channel Skipping","No Local Channel","Water Damaged","Tampered by tech.","CPU Damaged","NAND Flash Damaged","Tuner Damaged","Demodulation Damaged","PLAY Issue","BLANK Screen","SMART CARD MUTE"];
+const FAULT_TYPES = ["No SIGNAL","No POWER","SHORT CIRCUIT","STB REBOOTING","Smart Card Incorrect","Smartcard Mute","Smartcard Removed","Sensor","Tampered Stb","No HDMI Output","No AV Output","No SOUND","INSERT CARD","Software Failed","Display Issue","No Program","No Channels","No Video output","Standby Mode","Channel Skipping","No Local Channel","Water Damaged","Tampered by tech.","CPU Damaged","NAND Flash Damaged","Tuner Damaged","Demodulation Damaged","PLAY Issue","BLANK Screen","SMART CARD MUTE"];
 const STB_MODELS  = ["Newland - NL-5043","Newland - NL-5101","Newland - NL-5101-L","Newland - NL-5101-T","KAON - KSTB2013","KAON - KSTB2145","KAON - KSTB2185","JIUZHOU - DTS3465","JIUZHOU - DTT3466","JIUZHOU - DTS3493","JIUZHOU - DTT3496","Skyworth - HT10B","Skyworth - HT65A","Skyworth - HS6009","Skyworth - HS6601","Coship - N8796B","INTEK - HD-S42NV","SmarDTV - DSB4360","GIEC - GK-BDT1310"];
 const REPLACEMENT_REASONS = ["STAFF-JIPE RAHA","UNDER WARRANTY","PROMO PAYMENT","Other"];
 const MANAGEMENT_TYPES    = ["Analyst","Logistics","Technical Manager","Executive"];
