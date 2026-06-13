@@ -8,8 +8,8 @@
     "noImplicitAny": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "jsx": "react-jsx",
     "forceConsistentCasingInFileNames": false
   },
-  "include": ["src/**/*"]
+  "include": ["server.ts", "src/index.ts"],
+  "exclude": ["src/components/**/*", "node_modules"]
 }
