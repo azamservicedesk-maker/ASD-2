@@ -2,14 +2,16 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "CommonJS",
+    "moduleResolution": "node",
     "outDir": "./dist",
     "rootDir": "./",
     "strict": false,
     "noImplicitAny": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "jsx": "react-jsx",
     "forceConsistentCasingInFileNames": false
   },
-  "include": ["server.ts", "src/index.ts"],
+  "include": ["server.ts", "src/**/*"],
   "exclude": ["src/components/**/*", "node_modules"]
 }
