@@ -33,5 +33,4 @@ async function startServer() {
       }
     });
 
-    // ❌ REMOVED express.static(distPath) and app.get("*") FROM HERE
-  }
+    
