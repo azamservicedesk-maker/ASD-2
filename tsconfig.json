@@ -9,9 +9,8 @@
     "noImplicitAny": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "jsx": "react-jsx",
     "forceConsistentCasingInFileNames": false
   },
-  "include": ["server.ts", "src/**/*"],
-  "exclude": ["src/components/**/*", "node_modules"]
+  "include": ["server.ts", "src/routes.ts"],
+  "exclude": ["src/app.tsx", "src/main.tsx", "src/hooks/**/*", "src/lib/**/*", "src/pages/**/*", "src/components/**/*", "node_modules"]
 }
