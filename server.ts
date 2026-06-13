@@ -22,10 +22,9 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    console.log("Serving build artifacts inside production /dist folder...");
-    const distPath = path.join(process.cwd(), "dist");
+    console.log("Serving backend infrastructure layers...");
     
-    // ✅ ADDED: Automated Render Health Check Route (Must sit above the * route)
+    // ✅ Keep ONLY the health check endpoint here
     app.get('/health', async (req, res) => {
       try {
         res.status(200).json({ status: 'UP', database: 'CONNECTED' });
@@ -34,17 +33,5 @@ async function startServer() {
       }
     });
 
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    // ❌ REMOVED express.static(distPath) and app.get("*") FROM HERE
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Azam Service Desk server running securely on port ${PORT}`);
-  });
-}
-
-startServer().catch(err => {
-  console.error("Critical failure during Express server start sequence:", err);
-});
