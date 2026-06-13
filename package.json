@@ -5,6 +5,7 @@
   "scripts": {
     "build": "npx prisma generate && tsc && npx prisma migrate deploy",
     "start": "node dist/server.js"
+
   },
     "dependencies": {
     "@prisma/client": "^5.12.1",
