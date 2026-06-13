@@ -11,7 +11,8 @@ async function startServer() {
   app.use(express.json());
 
   console.log("Registering Express server API sub-routes on /api...");
-  app.use("/api", apiRouter);
+  app.use('/api', router);
+
 
   // Vite integrated middleware setup for dev vs prod builds
   if (process.env.NODE_ENV !== "production") {
