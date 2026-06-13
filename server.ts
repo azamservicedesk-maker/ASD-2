@@ -24,7 +24,7 @@ async function startServer() {
   } else {
     console.log("Serving backend infrastructure layers...");
     
-    // ✅ Keep ONLY the health check endpoint here
+    // Automated Render Health Check Route
     app.get('/health', async (req, res) => {
       try {
         res.status(200).json({ status: 'UP', database: 'CONNECTED' });
@@ -32,5 +32,13 @@ async function startServer() {
         res.status(500).json({ status: 'DOWN' });
       }
     });
+  }
 
-    
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Azam Service Desk server running securely on port ${PORT}`);
+  });
+}
+
+startServer().catch(err => {
+  console.error("Critical failure during Express server start sequence:", err);
+});
